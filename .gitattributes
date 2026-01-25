@@ -1,12 +1,11 @@
 # Unreal Engine 5 .gitattributes
-
 # Auto detect text files and normalize line endings
 * text=auto
 # Unreal Engine assets (binary files)
-*.uasset binary
-*.umap binary
-*.upk binary
-*.ubulk binary
+*.uasset filter=lfs diff=lfs merge=lfs -text
+*.umap filter=lfs diff=lfs merge=lfs -text
+*.upk filter=lfs diff=lfs merge=lfs -text
+*.ubulk filter=lfs diff=lfs merge=lfs -text
 # Textures
 *.png binary
 *.jpg binary
@@ -53,7 +52,3 @@
 *.uproject text
 *.ini text
 *.md text
-*.uasset filter=lfs diff=lfs merge=lfs -text
-*.umap filter=lfs diff=lfs merge=lfs -text
-*.ubulk filter=lfs diff=lfs merge=lfs -text
-*.upk filter=lfs diff=lfs merge=lfs -text
