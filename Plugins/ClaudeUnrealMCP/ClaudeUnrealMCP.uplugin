@@ -1,0 +1,23 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Claude Unreal MCP",
+	"Description": "MCP integration for Claude AI to interact with Unreal Engine",
+	"Category": "Editor",
+	"CreatedBy": "Claude",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "ClaudeUnrealMCP",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
