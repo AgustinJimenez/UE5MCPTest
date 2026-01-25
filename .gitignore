@@ -48,6 +48,9 @@ CrashReportClient.ini
 Plugins/**/Binaries/
 Plugins/**/Intermediate/
 
+# External plugins (install separately)
+Plugins/McpAutomationBridge/
+
 # Ignore cooked content
 Content/Paks/
 

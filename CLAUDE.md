@@ -72,3 +72,45 @@ Key settings in `/Config/`:
 - Enhanced Input System enabled (EnhancedPlayerInput, EnhancedInputComponent)
 - Lumen GI, Virtual Shadow Maps, Nanite enabled
 - Gameplay Tags system with animation state tags and foley event tags
+
+## MCP Integration (Claude Code)
+
+This project supports Claude Code control via the Unreal MCP server.
+
+### Setup
+
+1. Clone the MCP server:
+   ```bash
+   cd /Users/agusj/repo/unreal_engine_5
+   git clone https://github.com/ChiR24/Unreal_mcp.git
+   cd Unreal_mcp && npm install
+   ```
+
+2. Copy the plugin to this project:
+   ```bash
+   cp -r /Users/agusj/repo/unreal_engine_5/Unreal_mcp/plugins/McpAutomationBridge Plugins/
+   ```
+
+3. Enable plugins in Unreal Editor (Edit → Plugins):
+   - Editor Scripting Utilities
+   - Sequencer Anim Tools
+   - Sequencer Scripting
+   - Control Rig
+
+4. Restart Unreal Editor
+
+5. Add to `~/.claude.json` under `mcpServers`:
+   ```json
+   "unreal-engine": {
+     "type": "stdio",
+     "command": "node",
+     "args": ["/Users/agusj/repo/unreal_engine_5/Unreal_mcp/dist/cli.js"],
+     "env": {
+       "UE_PROJECT_PATH": "/Users/agusj/repo/unreal_engine_5/UETest1",
+       "MCP_AUTOMATION_HOST": "127.0.0.1",
+       "MCP_AUTOMATION_PORT": "8091"
+     }
+   }
+   ```
+
+6. Restart Claude Code
