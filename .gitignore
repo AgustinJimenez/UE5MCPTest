@@ -1,0 +1,58 @@
+# Unreal Engine 5 .gitignore
+
+# Compiled binaries
+Binaries/
+DerivedDataCache/
+Intermediate/
+
+# Build artifacts
+Build/
+
+# Saved data (local settings, autosaves, logs)
+Saved/
+
+# IDE and editor files
+.vs/
+.vscode/
+.idea/
+*.sln
+*.xcworkspace/
+*.xcodeproj/
+
+# Visual Studio generated files
+*.VC.db
+*.VC.VC.opendb
+
+# Rider generated files
+.idea/
+
+# Mac OS files
+.DS_Store
+*.swp
+*~
+
+# Windows files
+Thumbs.db
+Desktop.ini
+
+# Compiled shaders
+*.shaderbin
+
+# Crash reports
+CrashReportClient.ini
+
+# Local content
+*.log
+
+# Plugins - compiled files
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# Ignore cooked content
+Content/Paks/
+
+# Local config overrides
+Config/UserEditor.ini
+Config/UserEngine.ini
+Config/UserGame.ini
+Config/UserInput.ini

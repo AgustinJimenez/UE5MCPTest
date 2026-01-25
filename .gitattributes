@@ -1,0 +1,59 @@
+# Unreal Engine 5 .gitattributes
+
+# Auto detect text files and normalize line endings
+* text=auto
+# Unreal Engine assets (binary files)
+*.uasset binary
+*.umap binary
+*.upk binary
+*.ubulk binary
+# Textures
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tga binary
+*.bmp binary
+*.psd binary
+*.tif binary
+*.tiff binary
+*.exr binary
+*.hdr binary
+# Audio
+*.wav binary
+*.mp3 binary
+*.ogg binary
+# Video
+*.mp4 binary
+*.mov binary
+*.avi binary
+*.wmv binary
+# Fonts
+*.ttf binary
+*.otf binary
+# 3D assets
+*.fbx binary
+*.obj binary
+*.gltf binary
+*.glb binary
+*.abc binary
+*.blend binary
+# Compiled assets
+*.dll binary
+*.exe binary
+*.dylib binary
+*.so binary
+# Archives
+*.zip binary
+*.7z binary
+*.rar binary
+# Documents
+*.pdf binary
+# Unreal specific
+*.uplugin text
+*.uproject text
+*.ini text
+*.md text
+*.uasset filter=lfs diff=lfs merge=lfs -text
+*.umap filter=lfs diff=lfs merge=lfs -text
+*.ubulk filter=lfs diff=lfs merge=lfs -text
+*.upk filter=lfs diff=lfs merge=lfs -text
