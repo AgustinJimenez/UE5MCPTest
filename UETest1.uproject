@@ -8,6 +8,11 @@
 			"Name": "UETest1",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "UETest1Editor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -36,6 +41,18 @@
 		},
 		{
 			"Name": "PoseSearch",
+			"Enabled": true
+		},
+		{
+			"Name": "AnimationModifierLibrary",
+			"Enabled": true
+		},
+		{
+			"Name": "StateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayStateTree",
 			"Enabled": true
 		},
 		{

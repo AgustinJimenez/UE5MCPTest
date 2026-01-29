@@ -26,12 +26,19 @@ private:
 	FString HandleReadVariables(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadComponents(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadEventGraph(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadEventGraphDetailed(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadFunctionGraphs(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadTimelines(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadInterface(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadUserDefinedStruct(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadUserDefinedEnum(const TSharedPtr<FJsonObject>& Params);
 	FString HandleListActors(const TSharedPtr<FJsonObject>& Params);
 
 	// Blueprint writing commands
 	FString HandleAddComponent(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSetComponentProperty(const TSharedPtr<FJsonObject>& Params);
 	FString HandleAddInputMapping(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReparentBlueprint(const TSharedPtr<FJsonObject>& Params);
 	FString HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSaveAsset(const TSharedPtr<FJsonObject>& Params);
 

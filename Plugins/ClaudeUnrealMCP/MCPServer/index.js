@@ -153,6 +153,104 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "read_event_graph_detailed",
+        description:
+          "Read the event graph nodes, connections, and pin default values from a blueprint",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "read_function_graphs",
+        description:
+          "Read function graph nodes, connections, and pin default values from a blueprint",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            name: {
+              type: "string",
+              description: "Optional function graph name to filter (exact match)",
+            },
+            max_nodes: {
+              type: "integer",
+              description: "Optional max nodes per graph (for large graphs)",
+            },
+            start_index: {
+              type: "integer",
+              description: "Optional start index into graph nodes (pagination)",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "read_timelines",
+        description: "Read timeline templates, tracks, and keys from a blueprint",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "read_interface",
+        description: "Read function signatures from a Blueprint Interface",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Full path to the interface asset",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "read_user_defined_struct",
+        description: "Read fields from a User Defined Struct asset",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Full path to the struct asset",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "read_user_defined_enum",
+        description: "Read entries from a User Defined Enum asset",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Full path to the enum asset",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
         name: "list_actors",
         description: "List all actors in the current level",
         inputSchema: {
@@ -229,6 +327,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["context_path", "action_path", "key"],
+        },
+      },
+      {
+        name: "reparent_blueprint",
+        description: "Reparent a blueprint to a new parent class",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            parent_class: {
+              type: "string",
+              description: "Parent class name or path (e.g., /Script/Engine.Actor or /Game/Blueprints/BP_MyBase.BP_MyBase_C)",
+            },
+          },
+          required: ["blueprint_path", "parent_class"],
         },
       },
       {

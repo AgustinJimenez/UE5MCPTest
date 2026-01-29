@@ -18,6 +18,7 @@ public class ClaudeUnrealMCP : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"UnrealEd",
+			"BlueprintEditorLibrary",
 			"BlueprintGraph",
 			"Kismet",
 			"AssetRegistry",

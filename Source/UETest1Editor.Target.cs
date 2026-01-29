@@ -10,6 +10,6 @@ public class UETest1EditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V6;
 
-		ExtraModuleNames.AddRange( new string[] { "UETest1" } );
+		ExtraModuleNames.AddRange( new string[] { "UETest1", "UETest1Editor" } );
 	}
 }

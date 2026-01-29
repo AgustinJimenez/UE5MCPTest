@@ -18,6 +18,11 @@ Or via command line (macOS):
 /Users/Shared/Epic\ Games/UE_5.7/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor "$(pwd)/UETest1.uproject"
 ```
 
+Rebuild C++ modules (macOS):
+```bash
+/Users/Shared/Epic\ Games/UE_5.7/Engine/Build/BatchFiles/Mac/Build.sh -ModuleWithSuffix=UETest1,9050 UETest1Editor Mac Development -Project="$(pwd)/UETest1.uproject" "$(pwd)/UETest1.uproject" -architecture=arm64 -IgnoreJunk
+```
+
 ## Architecture
 
 ### Plugin Dependencies

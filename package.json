@@ -1,0 +1,7 @@
+{
+  "name": "ue5-mcp-tools",
+  "private": true,
+  "scripts": {
+    "restart:ue": "osascript -e \"tell application \\\"UnrealEditor\\\" to quit\" && open UETest1.uproject && sleep 20"
+  }
+}

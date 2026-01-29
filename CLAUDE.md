@@ -11,7 +11,7 @@ Add to `~/.claude.json` under `mcpServers`:
 "unreal-engine": {
   "type": "stdio",
   "command": "node",
-  "args": ["/Users/agusj/repo/unreal_engine_5/UETest1/Plugins/ClaudeUnrealMCP/MCPServer/index.js"],
+  "args": ["/Users/agusj/repo/unreal_engine_5/UE5MCPTest/Plugins/ClaudeUnrealMCP/MCPServer/index.js"],
   "env": {}
 }
 ```

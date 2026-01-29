@@ -5,7 +5,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "restart:ue": "osascript -e \"tell application \\\"UnrealEditor\\\" to quit\" && open ../../../../UETest1.uproject"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.5.0"
