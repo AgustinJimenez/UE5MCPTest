@@ -41,8 +41,15 @@ Progress (Batch 1):
 - Editor module created for AnimModifiers (UETest1Editor). AnimModifier subclasses removed after linker errors; AM_* remain blocked.
 - Reparented to C++: BP_MovementMode_Falling, BP_MovementTransition_FromSlide, BP_MovementTransition_ToSlide.
 - MCP: added read_timelines tool to expose timeline templates/tracks/keys for BP timeline conversion.
-- SpinningArrow: C++ class created (timeline curves + spinner transform). Reparented to C++.
-- SpinningArrow: adjusted C++ to reference existing BP components by name to avoid property collisions; needs recompile and BP recompile/save.
+- SpinningArrow: C++ class created (timeline curves + spinner transform). Reparented to C++ and saved successfully after fixes.
+- SpinningArrow fixes:
+  - Avoided property name collisions by removing C++ subobject components for Spinner/Arrow; cache BP components by name at runtime.
+  - Timeline curves moved to runtime with `Transient` properties to avoid illegal private object save errors.
+- BP_Manny: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparented to C++.
+- BP_Quinn: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparented to C++.
+- BP_Twinblast: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparented to C++.
+- BP_UE4_Mannequin: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparent pending until next build/load.
+- BP_Echo: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparent pending until next build/load.
 - BP_Manny: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparented to C++.
 - BP_Quinn: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparented to C++.
 - BP_Twinblast: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparented to C++.

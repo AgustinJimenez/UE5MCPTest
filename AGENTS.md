@@ -124,6 +124,12 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 - `compile_blueprint` - Compile a blueprint
 - `save_asset` - Save an asset to disk
 
+## Workflow Notes (Current)
+- We’re converting Blueprints to C++ in order from easiest to hardest (see `CURRENT_TASK.md`).
+- New MCP tool added: `read_timelines` (reads timeline templates/tracks/keys). If it isn’t visible in `/mcp`, restart UE + Codex CLI so the MCP server reloads.
+- When reparenting BPs to C++, avoid C++ component properties that collide with existing BP component names (e.g., `Spinner`, `Arrow`). Use runtime component lookup by name instead.
+- For timeline curves created at runtime, mark the curve UPROPERTYs as `Transient` and create/bind them in `BeginPlay` to avoid “Illegal reference to private object” save errors.
+
 ## TODO
 
 - [ ] Convert blueprints to C++ using the MCP to read blueprint logic and translate to equivalent C++ code
