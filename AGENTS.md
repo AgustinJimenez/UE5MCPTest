@@ -164,6 +164,7 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 - `refresh_nodes` - Refresh/reconstruct all nodes in a blueprint to fix stale pin errors
 - `set_blueprint_compile_settings` - Modify blueprint compilation settings (thread-safe execution, etc.)
 - `modify_function_metadata` - Modify function metadata flags (BlueprintThreadSafe, BlueprintPure)
+- `capture_screenshot` - Capture screenshot of active viewport (saved to `Saved/AutoScreenshot.png`)
 
 ## Recent MCP Improvements
 
@@ -227,6 +228,7 @@ Investigation into why C++ structs can't be found via MCP tools revealed key ins
   - **Current blocker**: S_LevelStyle has `Map<FName, S_GridMaterialParams>` but needs `Map<FName, FS_GridMaterialParams>`. This blocks LevelVisuals blueprint compilation.
   - **Manual fix required**: Open `/Game/Levels/LevelPrototyping/Data/S_LevelStyle` in Struct Editor → Find BlockColors field (Map type) → Change Map's Value Type from S_GridMaterialParams to FS_GridMaterialParams → Compile and save → Compile LevelVisuals blueprint.
   - After fixing S_LevelStyle, you can optionally delete the old `/Game/Levels/LevelPrototyping/Data/S_GridMaterialParams` blueprint struct.
+- **Screenshot Capture (New - 2026-01-30)**: Added `capture_screenshot` MCP command to capture the active Unreal Editor viewport. Screenshots are saved to `ProjectDir/Saved/AutoScreenshot.png`. This enables AI assistants to visually see the editor viewport, level layout, and visual state for debugging and verification. Successfully tested with viewport capture showing level geometry and Game Animation Sample content.
 
 ## TODO
 

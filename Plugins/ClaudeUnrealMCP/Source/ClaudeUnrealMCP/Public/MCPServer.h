@@ -51,6 +51,7 @@ private:
 	FString HandleModifyStructField(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSetBlueprintCompileSettings(const TSharedPtr<FJsonObject>& Params);
 	FString HandleModifyFunctionMetadata(const TSharedPtr<FJsonObject>& Params);
+	FString HandleCaptureScreenshot(const TSharedPtr<FJsonObject>& Params);
 
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));

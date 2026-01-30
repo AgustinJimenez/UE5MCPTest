@@ -585,6 +585,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["blueprint_path", "function_name"],
         },
       },
+      {
+        name: "capture_screenshot",
+        description: "Capture a screenshot of the active Unreal Engine viewport",
+        inputSchema: {
+          type: "object",
+          properties: {
+            filename: {
+              type: "string",
+              description: "Optional filename (without extension). Defaults to 'MCP_Screenshot'. A timestamp will be appended automatically.",
+            },
+          },
+        },
+      },
     ],
   };
 });

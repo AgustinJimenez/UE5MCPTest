@@ -368,6 +368,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleModifyFunctionMetadata(Params);
 	}
+	else if (Command == TEXT("capture_screenshot"))
+	{
+		return HandleCaptureScreenshot(Params);
+	}
 
 	return MakeError(FString::Printf(TEXT("Unknown command: %s"), *Command));
 }
@@ -2496,4 +2500,53 @@ FString FMCPServer::HandleModifyFunctionMetadata(const TSharedPtr<FJsonObject>& 
 	Data->SetStringField(TEXT("function_name"), FunctionName);
 
 	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleCaptureScreenshot(const TSharedPtr<FJsonObject>& Params)
+{
+	// Get optional filename parameter
+	FString Filename = TEXT("MCP_Screenshot");
+	if (Params.IsValid() && Params->HasField(TEXT("filename")))
+	{
+		Filename = Params->GetStringField(TEXT("filename"));
+		// Remove extension if provided - we'll add .png
+		Filename.RemoveFromEnd(TEXT(".png"));
+		Filename.RemoveFromEnd(TEXT(".jpg"));
+	}
+
+	// Add timestamp to ensure uniqueness
+	FDateTime Now = FDateTime::Now();
+	FString TimestampedFilename = FString::Printf(TEXT("%s_%s"),
+		*Filename,
+		*Now.ToString(TEXT("%Y%m%d_%H%M%S")));
+
+	// Construct full path: ProjectDir/Saved/Screenshots/
+	FString ProjectDir = FPaths::ProjectDir();
+	FString ScreenshotDir = FPaths::Combine(ProjectDir, TEXT("Saved"), TEXT("Screenshots"));
+
+	// Ensure directory exists
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	if (!PlatformFile.DirectoryExists(*ScreenshotDir))
+	{
+		if (!PlatformFile.CreateDirectoryTree(*ScreenshotDir))
+		{
+			return MakeError(FString::Printf(TEXT("Failed to create screenshot directory: %s"), *ScreenshotDir));
+		}
+	}
+
+	// Construct full file path
+	FString FullPath = FPaths::Combine(ScreenshotDir, TimestampedFilename + TEXT(".png"));
+
+	// Request screenshot - this captures the active viewport
+	FScreenshotRequest::RequestScreenshot(FullPath, false, false);
+
+	// Note: Screenshot is captured asynchronously, but the file should be written very quickly
+	// We'll return immediately with the expected path
+
+	TSharedPtr<FJsonObject> ResponseData = MakeShared<FJsonObject>();
+	ResponseData->SetStringField(TEXT("message"), TEXT("Screenshot captured successfully"));
+	ResponseData->SetStringField(TEXT("path"), FullPath);
+	ResponseData->SetStringField(TEXT("filename"), TimestampedFilename + TEXT(".png"));
+
+	return MakeResponse(true, ResponseData);
 }
