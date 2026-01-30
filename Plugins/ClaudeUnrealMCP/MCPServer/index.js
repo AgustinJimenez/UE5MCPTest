@@ -17,7 +17,9 @@ async function sendToUnreal(command, params = {}) {
     const client = new net.Socket();
     let data = "";
 
-    client.setTimeout(10000);
+    // Increase socket buffer size for large responses
+    client.setNoDelay(true); // Disable Nagle's algorithm
+    client.setTimeout(30000); // Increase timeout to 30 seconds
 
     client.connect(UE_PORT, UE_HOST, () => {
       const request = JSON.stringify({ command, params });
@@ -25,13 +27,17 @@ async function sendToUnreal(command, params = {}) {
     });
 
     client.on("data", (chunk) => {
-      data += chunk.toString();
-      if (data.includes("\n")) {
+      data += chunk.toString("utf8");
+      // Only try to parse when we have a complete message (ends with newline)
+      if (data.endsWith("\n")) {
         client.destroy();
         try {
-          resolve(JSON.parse(data.trim()));
+          const trimmed = data.trim();
+          console.error(`Received ${trimmed.length} bytes from Unreal Engine`);
+          resolve(JSON.parse(trimmed));
         } catch (e) {
-          reject(new Error(`Invalid JSON response: ${data}`));
+          const preview = data.length > 1000 ? data.substring(0, 1000) + "... (truncated for display)" : data;
+          reject(new Error(`Invalid JSON response (${data.length} bytes): ${preview}`));
         }
       }
     });
@@ -77,6 +83,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "ping",
         description: "Test connection to Unreal Engine",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "reload_mcp_server",
+        description: "Reload the MCP server (useful after code changes to index.js)",
         inputSchema: {
           type: "object",
           properties: {},
@@ -162,6 +176,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             path: {
               type: "string",
               description: "Full path to the blueprint asset",
+            },
+            max_nodes: {
+              type: "integer",
+              description: "Optional max nodes to return (for large graphs, use pagination)",
+            },
+            start_index: {
+              type: "integer",
+              description: "Optional start index into graph nodes (pagination)",
             },
           },
           required: ["path"],
@@ -375,6 +397,194 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["path"],
         },
       },
+      {
+        name: "save_all",
+        description: "Save all modified assets in the project",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "delete_interface_function",
+        description: "Delete a function from a Blueprint Interface",
+        inputSchema: {
+          type: "object",
+          properties: {
+            interface_path: {
+              type: "string",
+              description: "Full path to the interface asset",
+            },
+            function_name: {
+              type: "string",
+              description: "Name of the function to delete",
+            },
+          },
+          required: ["interface_path", "function_name"],
+        },
+      },
+      {
+        name: "delete_function_graph",
+        description: "Delete a function graph from a Blueprint or Blueprint Function Library",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            function_name: {
+              type: "string",
+              description: "Name of the function graph to delete",
+            },
+          },
+          required: ["blueprint_path", "function_name"],
+        },
+      },
+      {
+        name: "clear_event_graph",
+        description: "Clear all nodes from a blueprint's event graph (useful for full C++ conversions to remove blueprint logic)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      {
+        name: "empty_graph",
+        description: "TEST: Empty all nodes from event graph (alias for clear_event_graph)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      {
+        name: "refresh_nodes",
+        description: "Refresh/reconstruct all nodes in a blueprint to fix stale pin errors",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      {
+        name: "break_orphaned_pins",
+        description: "Aggressively remove orphaned pins and break their connections. Use when refresh_nodes doesn't fix orphaned pin errors.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      {
+        name: "delete_user_defined_struct",
+        description: "Delete a user-defined struct asset. Useful when replacing blueprint structs with C++ versions.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            struct_path: {
+              type: "string",
+              description: "Full path to the struct asset",
+            },
+          },
+          required: ["struct_path"],
+        },
+      },
+      {
+        name: "modify_struct_field",
+        description: "Modify a field type in a user-defined struct. Useful for updating blueprint structs to use C++ struct types.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            struct_path: {
+              type: "string",
+              description: "Full path to the struct asset",
+            },
+            field_name: {
+              type: "string",
+              description: "Name of the field to modify (e.g., BlockColors_19_BD7B5F9248A47F4BA4AEE2BCADEEA20F)",
+            },
+            new_type: {
+              type: "string",
+              description: "New type for the field (e.g., FS_GridMaterialParams for C++ struct, S_GridMaterialParams for blueprint struct)",
+            },
+          },
+          required: ["struct_path", "field_name", "new_type"],
+        },
+      },
+      {
+        name: "set_blueprint_compile_settings",
+        description: "Modify blueprint compilation settings (e.g., thread-safe execution, construction script behavior)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            run_construction_script_on_drag: {
+              type: "boolean",
+              description: "Whether to run construction script when dragging in editor",
+            },
+            generate_const_class: {
+              type: "boolean",
+              description: "Whether to generate const class",
+            },
+            force_full_editor: {
+              type: "boolean",
+              description: "Whether to force full editor",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      {
+        name: "modify_function_metadata",
+        description: "Modify function metadata flags (e.g., BlueprintThreadSafe, BlueprintPure)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            function_name: {
+              type: "string",
+              description: "Name of the function to modify",
+            },
+            blueprint_thread_safe: {
+              type: "boolean",
+              description: "Whether the function is thread-safe (can be called from animation worker threads)",
+            },
+            blueprint_pure: {
+              type: "boolean",
+              description: "Whether the function is pure (no execution pins)",
+            },
+          },
+          required: ["blueprint_path", "function_name"],
+        },
+      },
     ],
   };
 });
@@ -382,6 +592,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+
+  // Handle reload_mcp_server specially (doesn't go to Unreal)
+  if (name === "reload_mcp_server") {
+    console.error("MCP Server: Reloading...");
+    // Exit cleanly - Claude Code will restart the server
+    process.exit(0);
+  }
 
   try {
     const result = await sendToUnreal(name, args || {});

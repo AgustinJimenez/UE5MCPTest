@@ -16,6 +16,7 @@
 #include "Serialization/JsonWriter.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Kismet2/CompilerResultsLog.h"
 #include "BlueprintEditorLibrary.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
@@ -23,6 +24,11 @@
 #include "Engine/UserDefinedStruct.h"
 #include "Engine/UserDefinedEnum.h"
 #include "Engine/TimelineTemplate.h"
+#include "UnrealEdGlobals.h"
+#include "Editor/UnrealEdEngine.h"
+#include "ObjectTools.h"
+#include "UserDefinedStructure/UserDefinedStructEditorData.h"
+#include "Kismet2/StructureEditorUtils.h"
 #include "Curves/CurveFloat.h"
 #include "Curves/CurveVector.h"
 #include "Curves/CurveLinearColor.h"
@@ -106,12 +112,30 @@ bool FMCPServer::HandleConnection(FSocket* ClientSocket, const FIPv4Endpoint& Cl
 
 void FMCPServer::HandleClient(FSocket* ClientSocket)
 {
+	// Enable TCP settings for better connection handling
+	ClientSocket->SetLinger(false, 0);      // Don't wait on close
+	ClientSocket->SetNoDelay(true);         // Disable Nagle's algorithm for low latency
+	ClientSocket->SetNonBlocking(false);     // Use blocking mode for simpler logic
+
 	TArray<uint8> Buffer;
 	Buffer.SetNumUninitialized(65536);
 
-	while (bRunning)
+	// Handle ONE request per connection, then close
+	// This prevents stale connection accumulation
+	uint32 PendingDataSize = 0;
+	const double StartTime = FPlatformTime::Seconds();
+	const double MaxWaitTime = 5.0; // Wait max 5 seconds for data
+
+	while (bRunning && (FPlatformTime::Seconds() - StartTime) < MaxWaitTime)
 	{
-		uint32 PendingDataSize = 0;
+		// Check socket state first
+		ESocketConnectionState State = ClientSocket->GetConnectionState();
+		if (State != ESocketConnectionState::SCS_Connected)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("ClaudeUnrealMCP: Client disconnected before sending data"));
+			break;
+		}
+
 		if (ClientSocket->HasPendingData(PendingDataSize) && PendingDataSize > 0)
 		{
 			int32 BytesRead = 0;
@@ -150,24 +174,62 @@ void FMCPServer::HandleClient(FSocket* ClientSocket)
 					// Send response
 					Response += TEXT("\n");
 					FTCHARToUTF8 Converter(*Response);
-					int32 BytesSent = 0;
-					ClientSocket->Send((uint8*)Converter.Get(), Converter.Length(), BytesSent);
+
+					// Send all data, handling partial sends
+					int32 TotalBytesSent = 0;
+					int32 DataLength = Converter.Length();
+					while (TotalBytesSent < DataLength)
+					{
+						int32 BytesSent = 0;
+						if (!ClientSocket->Send((uint8*)Converter.Get() + TotalBytesSent, DataLength - TotalBytesSent, BytesSent))
+						{
+							UE_LOG(LogTemp, Warning, TEXT("ClaudeUnrealMCP: Failed to send response to client"));
+							break;
+						}
+						TotalBytesSent += BytesSent;
+
+						if (BytesSent == 0)
+						{
+							// No progress, avoid infinite loop
+							UE_LOG(LogTemp, Warning, TEXT("ClaudeUnrealMCP: Socket send returned 0 bytes, aborting"));
+							break;
+						}
+					}
+
+					if (TotalBytesSent == DataLength)
+					{
+						UE_LOG(LogTemp, Log, TEXT("ClaudeUnrealMCP: Successfully sent %d bytes"), DataLength);
+					}
+					else
+					{
+						UE_LOG(LogTemp, Warning, TEXT("ClaudeUnrealMCP: Partial send - sent %d of %d bytes"), TotalBytesSent, DataLength);
+					}
+
+					// Close connection after handling ONE request
+					// This prevents connection reuse issues and stale connections
+					break;
 				}
+				else
+				{
+					// Zero bytes read means connection closed
+					break;
+				}
+			}
+			else
+			{
+				// Recv failed, connection likely dead
+				UE_LOG(LogTemp, Warning, TEXT("ClaudeUnrealMCP: Socket recv failed"));
+				break;
 			}
 		}
 		else
 		{
+			// No data yet, sleep briefly
 			FPlatformProcess::Sleep(0.01f);
-		}
-
-		// Check if socket is still connected
-		ESocketConnectionState State = ClientSocket->GetConnectionState();
-		if (State != ESocketConnectionState::SCS_Connected)
-		{
-			break;
 		}
 	}
 
+	// Clean up connection
 	ClientSocket->Close();
 
 	{
@@ -261,6 +323,50 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	else if (Command == TEXT("save_asset"))
 	{
 		return HandleSaveAsset(Params);
+	}
+	else if (Command == TEXT("save_all"))
+	{
+		return HandleSaveAll(Params);
+	}
+	else if (Command == TEXT("delete_interface_function"))
+	{
+		return HandleDeleteInterfaceFunction(Params);
+	}
+	else if (Command == TEXT("delete_function_graph"))
+	{
+		return HandleDeleteFunctionGraph(Params);
+	}
+	else if (Command == TEXT("clear_event_graph"))
+	{
+		return HandleClearEventGraph(Params);
+	}
+	else if (Command == TEXT("empty_graph"))
+	{
+		return HandleClearEventGraph(Params);
+	}
+	else if (Command == TEXT("refresh_nodes"))
+	{
+		return HandleRefreshNodes(Params);
+	}
+	else if (Command == TEXT("break_orphaned_pins"))
+	{
+		return HandleBreakOrphanedPins(Params);
+	}
+	else if (Command == TEXT("delete_user_defined_struct"))
+	{
+		return HandleDeleteUserDefinedStruct(Params);
+	}
+	else if (Command == TEXT("modify_struct_field"))
+	{
+		return HandleModifyStructField(Params);
+	}
+	else if (Command == TEXT("set_blueprint_compile_settings"))
+	{
+		return HandleSetBlueprintCompileSettings(Params);
+	}
+	else if (Command == TEXT("modify_function_metadata"))
+	{
+		return HandleModifyFunctionMetadata(Params);
 	}
 
 	return MakeError(FString::Printf(TEXT("Unknown command: %s"), *Command));
@@ -586,6 +692,8 @@ FString FMCPServer::HandleReadEventGraphDetailed(const TSharedPtr<FJsonObject>& 
 	}
 
 	FString Path = Params->GetStringField(TEXT("path"));
+	const int32 MaxNodes = Params->HasField(TEXT("max_nodes")) ? Params->GetIntegerField(TEXT("max_nodes")) : -1;
+	const int32 StartIndex = Params->HasField(TEXT("start_index")) ? Params->GetIntegerField(TEXT("start_index")) : 0;
 	UBlueprint* Blueprint = LoadBlueprintFromPath(Path);
 
 	if (!Blueprint)
@@ -603,9 +711,12 @@ FString FMCPServer::HandleReadEventGraphDetailed(const TSharedPtr<FJsonObject>& 
 		GraphObj->SetStringField(TEXT("name"), Graph->GetName());
 
 		TArray<TSharedPtr<FJsonValue>> NodesArray;
+		int32 NodeIndex = 0;
 		for (UEdGraphNode* Node : Graph->Nodes)
 		{
 			if (!Node) continue;
+			if (NodeIndex++ < StartIndex) continue;
+			if (MaxNodes >= 0 && NodesArray.Num() >= MaxNodes) break;
 
 			TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
 			NodeObj->SetStringField(TEXT("id"), Node->NodeGuid.ToString());
@@ -1569,19 +1680,55 @@ FString FMCPServer::HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Params
 	}
 
 	// Compile the blueprint
-	FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None);
+	FCompilerResultsLog CompileLog;
+	FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &CompileLog);
 
 	bool bSuccess = (Blueprint->Status == BS_UpToDate || Blueprint->Status == BS_UpToDateWithWarnings);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetBoolField(TEXT("compiled"), bSuccess);
-	Data->SetStringField(TEXT("status"), bSuccess ? TEXT("Success") : TEXT("Failed"));
 
-	if (!bSuccess)
+	// Get blueprint status string
+	FString StatusString;
+	switch (Blueprint->Status)
 	{
-		return MakeError(TEXT("Blueprint compilation failed"));
+	case BS_Unknown: StatusString = TEXT("Unknown"); break;
+	case BS_Dirty: StatusString = TEXT("Dirty"); break;
+	case BS_Error: StatusString = TEXT("Error"); break;
+	case BS_UpToDate: StatusString = TEXT("UpToDate"); break;
+	case BS_BeingCreated: StatusString = TEXT("BeingCreated"); break;
+	case BS_UpToDateWithWarnings: StatusString = TEXT("UpToDateWithWarnings"); break;
+	default: StatusString = TEXT("Unknown");
+	}
+	Data->SetStringField(TEXT("status"), StatusString);
+
+	// Capture compilation errors and warnings
+	TArray<TSharedPtr<FJsonValue>> ErrorsArray;
+	TArray<TSharedPtr<FJsonValue>> WarningsArray;
+
+	for (const TSharedRef<FTokenizedMessage>& Message : CompileLog.Messages)
+	{
+		TSharedPtr<FJsonObject> MsgObj = MakeShared<FJsonObject>();
+		MsgObj->SetStringField(TEXT("message"), Message->ToText().ToString());
+		MsgObj->SetStringField(TEXT("severity"), FString::FromInt((int32)Message->GetSeverity()));
+
+		if (Message->GetSeverity() == EMessageSeverity::Error)
+		{
+			ErrorsArray.Add(MakeShared<FJsonValueObject>(MsgObj));
+		}
+		else if (Message->GetSeverity() == EMessageSeverity::Warning)
+		{
+			WarningsArray.Add(MakeShared<FJsonValueObject>(MsgObj));
+		}
 	}
 
+	Data->SetArrayField(TEXT("errors"), ErrorsArray);
+	Data->SetArrayField(TEXT("warnings"), WarningsArray);
+	Data->SetNumberField(TEXT("error_count"), ErrorsArray.Num());
+	Data->SetNumberField(TEXT("warning_count"), WarningsArray.Num());
+
+	// Always return success=true so error details are visible
+	// The 'compiled' field indicates actual compilation status
 	return MakeResponse(true, Data);
 }
 
@@ -1628,6 +1775,725 @@ FString FMCPServer::HandleSaveAsset(const TSharedPtr<FJsonObject>& Params)
 	{
 		return MakeError(TEXT("Failed to save asset"));
 	}
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleSaveAll(const TSharedPtr<FJsonObject>& Params)
+{
+	// Save all dirty packages
+	TArray<UPackage*> DirtyPackages;
+
+	// Get all dirty packages
+	for (TObjectIterator<UPackage> It; It; ++It)
+	{
+		UPackage* Package = *It;
+		if (Package && Package->IsDirty() && !Package->HasAnyFlags(RF_Transient))
+		{
+			DirtyPackages.Add(Package);
+		}
+	}
+
+	int32 SavedCount = 0;
+	int32 FailedCount = 0;
+	TArray<FString> FailedPackages;
+
+	for (UPackage* Package : DirtyPackages)
+	{
+		FString PackageName = Package->GetName();
+
+		// Skip packages that don't have a valid path (e.g., temp packages)
+		if (!FPackageName::IsValidLongPackageName(PackageName))
+		{
+			continue;
+		}
+
+		FString PackageFileName = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Standalone;
+
+		if (UPackage::SavePackage(Package, nullptr, *PackageFileName, SaveArgs))
+		{
+			SavedCount++;
+		}
+		else
+		{
+			FailedCount++;
+			FailedPackages.Add(PackageName);
+		}
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("saved_count"), SavedCount);
+	Data->SetNumberField(TEXT("failed_count"), FailedCount);
+	Data->SetNumberField(TEXT("total_dirty"), DirtyPackages.Num());
+
+	if (FailedPackages.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> FailedArray;
+		for (const FString& FailedPkg : FailedPackages)
+		{
+			FailedArray.Add(MakeShared<FJsonValueString>(FailedPkg));
+		}
+		Data->SetArrayField(TEXT("failed_packages"), FailedArray);
+	}
+
+	FString Message = FString::Printf(TEXT("Saved %d package(s), %d failed"), SavedCount, FailedCount);
+	Data->SetStringField(TEXT("message"), Message);
+
+	if (FailedCount > 0)
+	{
+		return MakeResponse(false, Data, Message);
+	}
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleDeleteInterfaceFunction(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("interface_path")) || !Params->HasField(TEXT("function_name")))
+	{
+		return MakeError(TEXT("Missing 'interface_path' or 'function_name' parameter"));
+	}
+
+	const FString InterfacePath = Params->GetStringField(TEXT("interface_path"));
+	const FString FunctionName = Params->GetStringField(TEXT("function_name"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(InterfacePath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Interface not found: %s"), *InterfacePath));
+	}
+
+	if (Blueprint->BlueprintType != BPTYPE_Interface)
+	{
+		return MakeError(TEXT("Blueprint is not an interface"));
+	}
+
+	// Find the function graph
+	UEdGraph* GraphToDelete = nullptr;
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName() == FunctionName)
+		{
+			GraphToDelete = Graph;
+			break;
+		}
+	}
+
+	if (!GraphToDelete)
+	{
+		return MakeError(FString::Printf(TEXT("Function '%s' not found in interface"), *FunctionName));
+	}
+
+	// Remove the function graph
+	Blueprint->FunctionGraphs.Remove(GraphToDelete);
+
+	// Mark the blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Function deleted successfully"));
+	Data->SetStringField(TEXT("function_name"), FunctionName);
+	Data->SetNumberField(TEXT("remaining_functions"), Blueprint->FunctionGraphs.Num());
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleDeleteFunctionGraph(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) || !Params->HasField(TEXT("function_name")))
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' or 'function_name' parameter"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	const FString FunctionName = Params->GetStringField(TEXT("function_name"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// Find the function graph
+	UEdGraph* GraphToDelete = nullptr;
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName() == FunctionName)
+		{
+			GraphToDelete = Graph;
+			break;
+		}
+	}
+
+	if (!GraphToDelete)
+	{
+		return MakeError(FString::Printf(TEXT("Function '%s' not found in blueprint"), *FunctionName));
+	}
+
+	// Remove the function graph
+	Blueprint->FunctionGraphs.Remove(GraphToDelete);
+
+	// Mark the blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Function graph deleted successfully"));
+	Data->SetStringField(TEXT("function_name"), FunctionName);
+	Data->SetNumberField(TEXT("remaining_functions"), Blueprint->FunctionGraphs.Num());
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleClearEventGraph(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")))
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' parameter"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// Get the event graph (typically UbergraphPages[0])
+	if (Blueprint->UbergraphPages.Num() == 0)
+	{
+		return MakeError(TEXT("Blueprint has no event graph"));
+	}
+
+	UEdGraph* EventGraph = Blueprint->UbergraphPages[0];
+	if (!EventGraph)
+	{
+		return MakeError(TEXT("Event graph is null"));
+	}
+
+	int32 NodesCleared = EventGraph->Nodes.Num();
+
+	// Remove all nodes from the event graph
+	EventGraph->Nodes.Empty();
+
+	// Mark the blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Event graph cleared successfully"));
+	Data->SetNumberField(TEXT("nodes_cleared"), NodesCleared);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleRefreshNodes(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")))
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' parameter"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	int32 NodesRefreshed = 0;
+
+	// First, try the built-in RefreshAllNodes which may handle orphaned pins better
+	FBlueprintEditorUtils::RefreshAllNodes(Blueprint);
+
+	// Refresh nodes in all graphs (UbergraphPages, FunctionGraphs, etc.)
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (!Graph) continue;
+
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node)
+			{
+				// First, break links to orphaned/stale pins before reconstructing
+				// This handles the case where pins have been renamed or removed in C++ function signatures
+				for (UEdGraphPin* Pin : Node->Pins)
+				{
+					if (!Pin) continue;
+
+					// Make a copy of linked pins since we'll be modifying the array
+					TArray<UEdGraphPin*> LinkedToCopy = Pin->LinkedTo;
+					for (UEdGraphPin* OtherPin : LinkedToCopy)
+					{
+						// If we are linked to a pin that its owner doesn't know about, break that link
+						if (!OtherPin || !OtherPin->GetOwningNodeUnchecked() ||
+							!OtherPin->GetOwningNode()->Pins.Contains(OtherPin))
+						{
+							Pin->BreakLinkTo(OtherPin);
+						}
+					}
+				}
+
+				// Reconstruct the node to get the updated pin configuration
+				Node->ReconstructNode();
+
+				// CRITICAL: After reconstruction, clean up stale incoming links from OTHER nodes
+				// This fixes the "In use pin X no longer exists" errors
+				for (UEdGraphNode* OtherNode : Graph->Nodes)
+				{
+					if (OtherNode && OtherNode != Node)
+					{
+						for (UEdGraphPin* OtherPin : OtherNode->Pins)
+						{
+							if (!OtherPin) continue;
+
+							// Check if this pin is linked to any pins that no longer exist on the reconstructed node
+							TArray<UEdGraphPin*> LinkedToCopy = OtherPin->LinkedTo;
+							for (UEdGraphPin* LinkedPin : LinkedToCopy)
+							{
+								// If linked to a pin on the reconstructed node that no longer exists in its Pins array
+								if (LinkedPin && LinkedPin->GetOwningNode() == Node &&
+									!Node->Pins.Contains(LinkedPin))
+								{
+									OtherPin->BreakLinkTo(LinkedPin);
+								}
+							}
+						}
+					}
+				}
+
+				NodesRefreshed++;
+			}
+		}
+	}
+
+	// Mark the blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Nodes refreshed successfully"));
+	Data->SetNumberField(TEXT("nodes_refreshed"), NodesRefreshed);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleBreakOrphanedPins(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")))
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' parameter"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	int32 PinsBroken = 0;
+	int32 PinsRemoved = 0;
+
+	// Get all graphs
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (!Graph) continue;
+
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node) continue;
+
+			// Track pins to remove (can't remove while iterating)
+			TArray<UEdGraphPin*> PinsToRemove;
+
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (!Pin) continue;
+
+				// Check if this pin is orphaned - it has the bOrphanedPin flag or has invalid connections
+				bool bIsOrphaned = Pin->bOrphanedPin;
+
+				// Also check if the pin name suggests it's orphaned (contains "DEPRECATED", "TRASH", or similar markers)
+				if (Pin->PinName.ToString().Contains(TEXT("TRASH")) ||
+					Pin->PinName.ToString().Contains(TEXT("DEPRECATED")))
+				{
+					bIsOrphaned = true;
+				}
+
+				// Break all connections to/from orphaned pins
+				if (bIsOrphaned && Pin->LinkedTo.Num() > 0)
+				{
+					Pin->BreakAllPinLinks();
+					PinsBroken += Pin->LinkedTo.Num();
+				}
+
+				// Mark orphaned pins for removal
+				if (bIsOrphaned)
+				{
+					PinsToRemove.Add(Pin);
+				}
+			}
+
+			// Remove orphaned pins from the node
+			for (UEdGraphPin* PinToRemove : PinsToRemove)
+			{
+				Node->Pins.Remove(PinToRemove);
+				PinsRemoved++;
+			}
+		}
+	}
+
+	// Mark the blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Orphaned pins cleaned up successfully"));
+	Data->SetNumberField(TEXT("pins_broken"), PinsBroken);
+	Data->SetNumberField(TEXT("pins_removed"), PinsRemoved);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleDeleteUserDefinedStruct(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("struct_path")))
+	{
+		return MakeError(TEXT("Missing 'struct_path' parameter"));
+	}
+
+	const FString StructPath = Params->GetStringField(TEXT("struct_path"));
+
+	// Load the struct asset
+	UUserDefinedStruct* Struct = LoadObject<UUserDefinedStruct>(nullptr, *StructPath);
+	if (!Struct)
+	{
+		return MakeError(FString::Printf(TEXT("Struct not found: %s"), *StructPath));
+	}
+
+	// Delete the asset
+	TArray<UObject*> ObjectsToDelete;
+	ObjectsToDelete.Add(Struct);
+
+	int32 NumDeleted = ObjectTools::DeleteObjects(ObjectsToDelete, false);
+
+	if (NumDeleted == 0)
+	{
+		return MakeError(TEXT("Failed to delete struct asset"));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Struct deleted successfully"));
+	Data->SetStringField(TEXT("struct_path"), StructPath);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleModifyStructField(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("struct_path")) ||
+		!Params->HasField(TEXT("field_name")) || !Params->HasField(TEXT("new_type")))
+	{
+		return MakeError(TEXT("Missing required parameters: struct_path, field_name, new_type"));
+	}
+
+	const FString StructPath = Params->GetStringField(TEXT("struct_path"));
+	const FString FieldName = Params->GetStringField(TEXT("field_name"));
+	const FString NewType = Params->GetStringField(TEXT("new_type"));
+
+	// Load the struct asset
+	UUserDefinedStruct* Struct = LoadObject<UUserDefinedStruct>(nullptr, *StructPath);
+	if (!Struct)
+	{
+		return MakeError(FString::Printf(TEXT("Struct not found: %s"), *StructPath));
+	}
+
+	// Get the struct's variable descriptions
+	TArray<FStructVariableDescription>& Variables = const_cast<TArray<FStructVariableDescription>&>(
+		FStructureEditorUtils::GetVarDesc(Struct)
+	);
+
+	// Find the field to modify
+	bool bFieldFound = false;
+	for (FStructVariableDescription& Variable : Variables)
+	{
+		if (Variable.VarName.ToString() == FieldName)
+		{
+			bFieldFound = true;
+
+			// Determine the new type based on the input
+			// For struct types, we need to load the struct and set it as the SubCategoryObject
+			if (NewType.StartsWith(TEXT("F")) || NewType.StartsWith(TEXT("S_")))
+			{
+				// This is a struct type
+				FString StructTypePath = NewType;
+				if (!StructTypePath.Contains(TEXT(".")))
+				{
+					// Try to find the struct - could be C++ or blueprint
+					// For C++ structs, they're in /Script/UETest1.StructName format
+					// For blueprint structs, they're in /Game/Path/StructName.StructName format
+
+					if (NewType.StartsWith(TEXT("FS_")))
+					{
+						// C++ struct - construct the path
+						StructTypePath = FString::Printf(TEXT("/Script/UETest1.%s"), *NewType);
+					}
+					else if (NewType.StartsWith(TEXT("S_")))
+					{
+						// Blueprint struct - try common locations
+						StructTypePath = FString::Printf(TEXT("/Game/Levels/LevelPrototyping/Data/%s.%s"), *NewType, *NewType);
+					}
+				}
+
+				// Try to load as UScriptStruct (C++ struct) - try multiple search patterns
+				UScriptStruct* ScriptStruct = FindObject<UScriptStruct>(nullptr, *StructTypePath);
+
+				// If not found, try searching by struct name alone (for C++ structs)
+				if (!ScriptStruct && NewType.StartsWith(TEXT("FS_")))
+				{
+					// For C++ structs, use FindPackage to get the module package
+					UPackage* Package = FindPackage(nullptr, TEXT("/Script/UETest1"));
+					if (Package)
+					{
+						ScriptStruct = FindObject<UScriptStruct>(Package, *NewType);
+					}
+
+					// If still not found, try LoadObject with full path
+					if (!ScriptStruct)
+					{
+						FString PackagePath = FString::Printf(TEXT("/Script/UETest1.%s"), *NewType);
+						ScriptStruct = LoadObject<UScriptStruct>(nullptr, *PackagePath);
+					}
+
+					// Last resort: iterate through all UScriptStruct objects
+					if (!ScriptStruct)
+					{
+						TArray<FString> FoundStructNames;
+						for (TObjectIterator<UScriptStruct> It; It; ++It)
+						{
+							FString StructName = It->GetName();
+							// Collect all struct names that start with "FS_" or "S_" for debugging
+							if (StructName.StartsWith(TEXT("FS_")) || StructName.StartsWith(TEXT("S_")))
+							{
+								FoundStructNames.Add(FString::Printf(TEXT("%s (%s)"), *StructName, *It->GetPathName()));
+							}
+
+							if (StructName == NewType)
+							{
+								ScriptStruct = *It;
+								break;
+							}
+						}
+
+						// If not found, include debug info about similar structs
+						if (!ScriptStruct && FoundStructNames.Num() > 0)
+						{
+							// Limit to first 20 structs for debugging
+							TArray<FString> LimitedList;
+							for (int32 i = 0; i < FMath::Min(20, FoundStructNames.Num()); i++)
+							{
+								LimitedList.Add(FoundStructNames[i]);
+							}
+							FString DebugInfo = FString::Printf(TEXT("Found %d structs (showing max 20): %s"),
+								FoundStructNames.Num(),
+								*FString::Join(LimitedList, TEXT(", ")));
+							UE_LOG(LogTemp, Warning, TEXT("Struct not found. %s"), *DebugInfo);
+						}
+					}
+				}
+
+				if (!ScriptStruct)
+				{
+					// Try to load as UserDefinedStruct (blueprint struct)
+					UUserDefinedStruct* TargetStruct = LoadObject<UUserDefinedStruct>(nullptr, *StructTypePath);
+					if (TargetStruct)
+					{
+						ScriptStruct = TargetStruct;
+					}
+				}
+
+				if (ScriptStruct)
+				{
+					Variable.Category = UEdGraphSchema_K2::PC_Struct;
+					Variable.SubCategoryObject = ScriptStruct;
+					Variable.PinValueType.TerminalCategory = UEdGraphSchema_K2::PC_Struct;
+					Variable.PinValueType.TerminalSubCategoryObject = ScriptStruct;
+				}
+				else
+				{
+					return MakeError(FString::Printf(TEXT("Could not find struct type: %s (tried path: %s)"), *NewType, *StructTypePath));
+				}
+			}
+
+			break;
+		}
+	}
+
+	if (!bFieldFound)
+	{
+		return MakeError(FString::Printf(TEXT("Field not found: %s"), *FieldName));
+	}
+
+	// Recompile the struct
+	FStructureEditorUtils::CompileStructure(Struct);
+
+	// Mark as modified
+	Struct->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Struct field modified successfully"));
+	Data->SetStringField(TEXT("struct_path"), StructPath);
+	Data->SetStringField(TEXT("field_name"), FieldName);
+	Data->SetStringField(TEXT("new_type"), NewType);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleSetBlueprintCompileSettings(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")))
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' parameter"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	bool bModified = false;
+
+	// Handle bRunConstructionScriptOnDrag setting
+	if (Params->HasField(TEXT("run_construction_script_on_drag")))
+	{
+		bool bValue = Params->GetBoolField(TEXT("run_construction_script_on_drag"));
+		Blueprint->bRunConstructionScriptOnDrag = bValue;
+		bModified = true;
+	}
+
+	// Handle bGenerateConstClass setting
+	if (Params->HasField(TEXT("generate_const_class")))
+	{
+		bool bValue = Params->GetBoolField(TEXT("generate_const_class"));
+		Blueprint->bGenerateConstClass = bValue;
+		bModified = true;
+	}
+
+	// Handle bForceFullEditor setting
+	if (Params->HasField(TEXT("force_full_editor")))
+	{
+		bool bValue = Params->GetBoolField(TEXT("force_full_editor"));
+		Blueprint->bForceFullEditor = bValue;
+		bModified = true;
+	}
+
+	if (!bModified)
+	{
+		return MakeError(TEXT("No valid settings provided. Available settings: run_construction_script_on_drag, generate_const_class, force_full_editor"));
+	}
+
+	// Mark the blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Blueprint compile settings updated successfully"));
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleModifyFunctionMetadata(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) || !Params->HasField(TEXT("function_name")))
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' or 'function_name' parameter"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	const FString FunctionName = Params->GetStringField(TEXT("function_name"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// Find the function graph
+	UEdGraph* FunctionGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName() == FunctionName)
+		{
+			FunctionGraph = Graph;
+			break;
+		}
+	}
+
+	if (!FunctionGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Function '%s' not found in blueprint"), *FunctionName));
+	}
+
+	// Find the function entry node
+	UK2Node_FunctionEntry* EntryNode = nullptr;
+	for (UEdGraphNode* Node : FunctionGraph->Nodes)
+	{
+		EntryNode = Cast<UK2Node_FunctionEntry>(Node);
+		if (EntryNode) break;
+	}
+
+	if (!EntryNode)
+	{
+		return MakeError(TEXT("Function entry node not found"));
+	}
+
+	bool bModified = false;
+
+	// Handle BlueprintThreadSafe metadata
+	if (Params->HasField(TEXT("blueprint_thread_safe")))
+	{
+		bool bValue = Params->GetBoolField(TEXT("blueprint_thread_safe"));
+		if (bValue)
+		{
+			EntryNode->MetaData.bThreadSafe = true;
+		}
+		else
+		{
+			EntryNode->MetaData.bThreadSafe = false;
+		}
+		bModified = true;
+	}
+
+	// Handle BlueprintPure metadata
+	if (Params->HasField(TEXT("blueprint_pure")))
+	{
+		bool bValue = Params->GetBoolField(TEXT("blueprint_pure"));
+		EntryNode->MetaData.bCallInEditor = bValue;
+		bModified = true;
+	}
+
+	if (!bModified)
+	{
+		return MakeError(TEXT("No valid metadata provided. Available metadata: blueprint_thread_safe, blueprint_pure"));
+	}
+
+	// Mark the blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Function metadata updated successfully"));
+	Data->SetStringField(TEXT("function_name"), FunctionName);
 
 	return MakeResponse(true, Data);
 }

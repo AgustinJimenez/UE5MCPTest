@@ -55,6 +55,41 @@ Progress (Batch 1):
 - BP_Twinblast: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparented to C++.
 - BP_UE4_Mannequin: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparent pending until next build/load.
 - BP_Echo: C++ class created to match component setup and BeginPlay deferred AddTickPrerequisiteComponent logic. Reparent pending until next build/load.
+- MCP Server Improvements (2026-01-29):
+  - Fixed connection management: Implemented one-request-per-connection pattern to prevent stale CLOSE_WAIT connections
+  - Added detailed compilation error reporting: compile_blueprint now returns arrays of errors/warnings with messages and severity
+  - Added save_all command: Saves all modified assets in project, returns saved/failed counts
+  - Added advanced MCP tools: delete_function_graph, refresh_nodes (with orphaned pin cleanup), set_blueprint_compile_settings, modify_function_metadata
+  - **Successfully fixed 49 out of 56 errors via MCP (87.5% success rate):**
+    - BPI_SandboxCharacter_ABP: Deleted 6 duplicate functions + made Get_InteractionTransform thread-safe
+    - BPI_InteractionTransform: Deleted 3 "_Old" duplicate functions
+    - I_FoleyAudioBankInterface: Deleted 1 duplicate function
+    - AC_PreCMCTick: Fixed via C++ edit - added BlueprintCallable to Tick delegate
+    - BFL_HelpfulFunctions: Deleted 10 conflicting function graphs (44 errors → 0)
+    - GM_Sandbox: Refreshed nodes after BFL_HelpfulFunctions cleanup (1 error → 0)
+    - AC_VisualOverrideManager: Refreshed nodes after BFL_HelpfulFunctions cleanup (1 error → 0)
+    - PSC_Traversal_Head: Made Get_InteractionTransform thread-safe in C++ (1 error → 0)
+    - PSC_Traversal_Pos: Made Get_InteractionTransform thread-safe in C++ (1 error → 0)
+    - GameAnimationWidget: Refreshed nodes after BFL_HelpfulFunctions cleanup (2 errors → 0)
+  - **Remaining 7 errors require manual Blueprint editor fixes (3 blueprints):**
+    - SandboxCharacter_CMC_ABP (3 errors): Orphaned pins on DebugDraw_StringArray nodes + Return Node
+    - SandboxCharacter_Mover_ABP (2 errors): Orphaned pins on DebugDraw_StringArray nodes
+    - AC_FoleyEvents (2 errors): Variable Get nodes referencing deleted blueprint variable "Foley Event Bank"
+  - **CRITICAL LIMITATION DISCOVERED - Orphaned Pins:**
+    - **What**: When C++ function parameters are renamed (e.g., "Highlighted String" → "HighlightedString"), blueprint nodes retain connections to old pin names
+    - **Why MCP can't fix**: Orphaned pin connection data is serialized in .uasset file, not accessible via Blueprint API
+    - **Evidence**: Extensive research (see refs below) confirms no programmatic API exists to remove orphaned pin metadata
+    - **MCP attempts made**: ReconstructNode(), BreakAllPinLinks(), FBlueprintEditorUtils::RefreshAllNodes(), post-reconstruction cleanup - all failed
+    - **Only solution**: Manual deletion of stale wire connections in Blueprint editor (10-30 seconds per blueprint)
+    - **References**:
+      - RigVMNode::GetOrphanedPins API (Control Rig only, not K2 nodes): https://dev.epicgames.com/documentation/en-us/unreal-engine/BlueprintAPI/RigVMNode/GetOrphanedPins
+      - UE Bug Reports on orphaned pins: UE-50159, UE-45846, UE-46224
+      - Forum consensus - manual fix required: https://forums.unrealengine.com/t/how-to-fix-broken-blueprint-pins-that-no-longer-exist/485666
+      - Blueprint Compiler Internals explanation: https://ikrima.dev/ue4guide/engine-programming/blueprints/bp-compiler-internals-2/
+  - **Lessons for future BP→C++ conversions:**
+    - Avoid renaming function parameters when converting (keep spaces if blueprint had them, or use UPARAM DisplayName metadata)
+    - Document which blueprints use debug functions so manual cleanup can be planned
+    - Budget 30 seconds per blueprint for manual orphaned pin cleanup if parameters are renamed
 
 Blockers / Notes:
 - AM_* AnimModifiers: still blocked by linker errors even in editor module. Requires different module/plugin setup that properly links AnimationModifierLibrary.

@@ -41,6 +41,16 @@ private:
 	FString HandleReparentBlueprint(const TSharedPtr<FJsonObject>& Params);
 	FString HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSaveAsset(const TSharedPtr<FJsonObject>& Params);
+	FString HandleSaveAll(const TSharedPtr<FJsonObject>& Params);
+	FString HandleDeleteInterfaceFunction(const TSharedPtr<FJsonObject>& Params);
+	FString HandleDeleteFunctionGraph(const TSharedPtr<FJsonObject>& Params);
+	FString HandleClearEventGraph(const TSharedPtr<FJsonObject>& Params);
+	FString HandleRefreshNodes(const TSharedPtr<FJsonObject>& Params);
+	FString HandleBreakOrphanedPins(const TSharedPtr<FJsonObject>& Params);
+	FString HandleDeleteUserDefinedStruct(const TSharedPtr<FJsonObject>& Params);
+	FString HandleModifyStructField(const TSharedPtr<FJsonObject>& Params);
+	FString HandleSetBlueprintCompileSettings(const TSharedPtr<FJsonObject>& Params);
+	FString HandleModifyFunctionMetadata(const TSharedPtr<FJsonObject>& Params);
 
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));
