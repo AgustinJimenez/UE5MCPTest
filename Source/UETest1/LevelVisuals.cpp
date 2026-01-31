@@ -36,10 +36,31 @@ ALevelVisuals::ALevelVisuals()
 		GreenParams.GridSizes = FVector(100.0, 100.0, 10.0);
 		GreenParams.Specularity = 0.5;
 
+		FS_GridMaterialParams OrangeParams;
+		OrangeParams.GridColor = FLinearColor(0.3f, 0.15f, 0.05f);
+		OrangeParams.SurfaceColor = FLinearColor(1.0f, 0.5f, 0.0f);
+		OrangeParams.GridSizes = FVector(100.0, 100.0, 10.0);
+		OrangeParams.Specularity = 0.5;
+
+		FS_GridMaterialParams RedParams;
+		RedParams.GridColor = FLinearColor(0.3f, 0.1f, 0.1f);
+		RedParams.SurfaceColor = FLinearColor(1.0f, 0.0f, 0.0f);
+		RedParams.GridSizes = FVector(100.0, 100.0, 10.0);
+		RedParams.Specularity = 0.5;
+
+		FS_GridMaterialParams YellowParams;
+		YellowParams.GridColor = FLinearColor(0.3f, 0.3f, 0.05f);
+		YellowParams.SurfaceColor = FLinearColor(1.0f, 1.0f, 0.0f);
+		YellowParams.GridSizes = FVector(100.0, 100.0, 10.0);
+		YellowParams.Specularity = 0.5;
+
 		DefaultStyle.BlockColors.Add(TEXT("None"), WhiteParams);
 		DefaultStyle.BlockColors.Add(TEXT("White"), WhiteParams);
 		DefaultStyle.BlockColors.Add(TEXT("Blue"), BlueParams);
 		DefaultStyle.BlockColors.Add(TEXT("Green"), GreenParams);
+		DefaultStyle.BlockColors.Add(TEXT("Orange"), OrangeParams);
+		DefaultStyle.BlockColors.Add(TEXT("Red"), RedParams);
+		DefaultStyle.BlockColors.Add(TEXT("Yellow"), YellowParams);
 
 		LevelStyles.Add(DefaultStyle);
 	}

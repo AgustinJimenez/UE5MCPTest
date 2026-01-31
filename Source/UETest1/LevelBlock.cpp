@@ -6,18 +6,48 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Kismet/KismetTextLibrary.h"
 #include "LevelButton.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Engine/StaticMesh.h"
+#include "LevelVisuals.h"
+#include "EngineUtils.h"
 
 ALevelBlock::ALevelBlock()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
+	// Create components
+	USceneComponent* SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("DefaultSceneRoot"));
+	RootComponent = SceneRoot;
+
+	CachedStaticMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StaticMesh"));
+	CachedStaticMesh->SetupAttachment(RootComponent);
+
+	// Set default mesh
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Game/Levels/LevelPrototyping/Meshes/SM_Cube.SM_Cube"));
+	if (CubeMesh.Succeeded())
+	{
+		CachedStaticMesh->SetStaticMesh(CubeMesh.Object);
+	}
+
+	// Set default material
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GridMaterial(TEXT("/Game/Levels/LevelPrototyping/Materials/M_Grid.M_Grid"));
+	if (GridMaterial.Succeeded())
+	{
+		BaseMaterial = GridMaterial.Object;
+		CachedStaticMesh->SetMaterial(0, BaseMaterial);
+	}
+
+	CachedTextRender = CreateDefaultSubobject<UTextRenderComponent>(TEXT("TextRender"));
+	CachedTextRender->SetupAttachment(CachedStaticMesh);
+
 	// Initialize defaults
 	AutoNameFromHeight = false;
-	UseLevelVisualsColor = false;
+	UseLevelVisualsColor = true;  // Enable LevelVisuals colors by default
+	ColorGroup = TEXT("Orange");  // Default to orange color
 
-	// Set default material params so blocks aren't black
-	MaterialParams.GridColor = FLinearColor(0.2f, 0.2f, 0.2f);
-	MaterialParams.SurfaceColor = FLinearColor::White;
+	// Set default material params (fallback if LevelVisuals not found)
+	MaterialParams.GridColor = FLinearColor(0.3f, 0.15f, 0.05f);
+	MaterialParams.SurfaceColor = FLinearColor(1.0f, 0.5f, 0.0f);  // Orange
 	MaterialParams.GridSizes = FVector(100.0, 100.0, 10.0);
 	MaterialParams.Specularity = 0.5;
 }
@@ -26,11 +56,7 @@ void ALevelBlock::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// Cache blueprint components
-	CachedDefaultSceneRoot = GetRootComponent();
-	CachedStaticMesh = FindComponentByClass<UStaticMeshComponent>();
-	CachedTextRender = FindComponentByClass<UTextRenderComponent>();
-
+	// Components are already cached from constructor
 	// Create dynamic material instance
 	if (CachedStaticMesh)
 	{
@@ -46,9 +72,37 @@ void ALevelBlock::OnConstruction(const FTransform& Transform)
 	if (UseLevelVisualsColor)
 	{
 		// Try to get LevelVisuals actor and use its color mapping
-		// Note: This requires LevelVisuals to be converted to C++ first
-		// For now, fall back to using MaterialParams
-		UpdateMaterials(MaterialParams);
+		UWorld* World = GetWorld();
+		ALevelVisuals* LevelVisualsActor = nullptr;
+
+		if (World)
+		{
+			// Find the LevelVisuals actor in the world
+			for (TActorIterator<ALevelVisuals> It(World); It; ++It)
+			{
+				LevelVisualsActor = *It;
+				break; // Use the first one found
+			}
+		}
+
+		if (LevelVisualsActor && LevelVisualsActor->LevelStyles.IsValidIndex(LevelVisualsActor->StyleIndex))
+		{
+			const FS_LevelStyle& CurrentStyle = LevelVisualsActor->LevelStyles[LevelVisualsActor->StyleIndex];
+			if (const FS_GridMaterialParams* ColorParams = CurrentStyle.BlockColors.Find(ColorGroup))
+			{
+				UpdateMaterials(*ColorParams);
+			}
+			else
+			{
+				// Fallback to MaterialParams if color group not found
+				UpdateMaterials(MaterialParams);
+			}
+		}
+		else
+		{
+			// Fallback to MaterialParams if LevelVisuals not found
+			UpdateMaterials(MaterialParams);
+		}
 	}
 	else
 	{

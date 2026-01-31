@@ -243,8 +243,52 @@ Blockers / Notes:
 - AC_VisualOverrideManager C++ logic inferred: toggles visibility of VisualOverride class actors based on DDCvar.VisualOverride (>=0 enables). Verify against BP if behavior differs.
 - AIC_NPC_SmartObject Delay values pulled from graph pins (DedicatedServer=8.0, Client=2.0).
 
-Remaining (43 blueprints, from table + progress list):
-- BFL_HelpfulFunctions, AM_Copy_IKFootRoot, AM_DistanceFromLedge, AM_FootSpeed_L, AM_FootSpeed_R, AM_FootSteps_Run, AM_FootSteps_Walk, AM_MoveData_Speed, AM_RateWarpingAlpha, AM_Reset_Attach, CameraDirector_SandboxCharacter, AM_RemoveCurves, BP_Manny, BP_Quinn, BP_Twinblast, BP_UE4_Mannequin, AM_TriggerWeightThreshold, BP_Echo, GM_Sandbox, SpinningArrow, STT_AddCooldown, STT_ClaimSlot, AM_RenameCurve, Teleporter_Level, AC_TraversalLogic, TargetDummy, Teleporter_Sender, LevelBlock_Traversable, Teleporter_Destination, STT_FindSmartObject, AM_ReorderCurves, LevelVisuals, AC_SmartObjectAnimation, STT_PlayAnimFromBestCost, LevelButton, BP_MovementMode_Slide, STT_PlayAnimMontage, AM_BakePhaseCurveFromFootstepNotices, AM_FootSteps_Modulation, LevelBlock, BP_MovementMode_Walking, AM_OrientationWarpingAlpha, AM_WarpingAlpha, BP_Kellan.
+**Conversion Session 2026-01-31:**
+- **Cannot Convert - Blueprint-Only Base Classes:**
+  - **CameraDirector_SandboxCharacter**: Inherits from BlueprintCameraDirectorEvaluator which isn't available in C++ in UE 5.7 (GameplayCameras plugin exists but headers not accessible)
+  - **BP_MovementMode_Walking**: Inherits from SmoothWalkingMode (Mover plugin) - header not accessible in C++, should remain as Blueprint
+  - **BP_MovementMode_Slide**: Also inherits from SmoothWalkingMode - same issue
+  - **StateTree Tasks** (STT_*): Inherit from StateTreeTaskBlueprintBase - Blueprint-only base class
+  - **StateTree Evaluators** (STE_*): Inherit from StateTreeEvaluatorBlueprintBase - Blueprint-only base class
+
+- **Cannot Convert - Very Complex Logic:**
+  - **AC_TraversalLogic**: Event graph is 123,690 characters (38,130 tokens) - impractically complex for conversion
+  - **STT_FindSmartObject**: Event graph 137,329 characters - complex Smart Object search
+  - **AC_SmartObjectAnimation**: Event graph 111,328 characters - complex animation state management
+  - **STT_PlayAnimFromBestCost**: Event graph 126,774 characters - complex animation selection
+
+- **Already Have C++ Parents (Blueprint Instances):**
+  - Most AnimNotifies, SmartObjects, retargeted characters already converted
+  - These are Blueprint instances that configure/override C++ classes
+
+- **Conversion Status Summary (2026-01-31):**
+  - **Successfully converted to C++**: 40+ blueprints (LevelBlock, LevelVisuals, LevelBlock_Traversable, GM_Sandbox, teleporter system, character variants, player controller, level utilities, foley system, smart objects)
+  - **Cannot convert**: ~10 blueprints (Blueprint-only base classes, movement modes, camera directors, state tree tasks)
+  - **Impractical to convert**: ~5 blueprints (very complex event graphs >100K characters)
+  - **Already C++ parents**: ~25 blueprints (just Blueprint instances of C++ classes)
+  - **Remaining convertible**: Few if any - most practical conversions complete
+
+**Latest Attempted Conversions (2026-01-31):**
+- Attempted: GM_Sandbox, LevelBlock_Traversable (successfully converted in previous session)
+- Attempted: CameraDirector_SandboxCharacter - FAILED (BlueprintCameraDirectorEvaluator not available in C++)
+  - Enabled GameplayCameras plugin in .uproject
+  - Added GameplayCameras module to Build.cs
+  - Multiple include path attempts all failed (headers don't exist)
+  - Conclusion: This class uses Blueprint-only GameplayCameras API
+- Attempted: BP_MovementMode_Walking - FAILED (SmoothWalkingMode header not accessible)
+  - Created MovementMode_Walking.h/cpp files
+  - Multiple include path attempts failed
+  - Conclusion: Mover plugin movement modes should remain as Blueprints
+  - **ACTION REQUIRED**: Delete MovementMode_Walking.h and MovementMode_Walking.cpp files
+
+**Files to Delete:**
+- E:\repo\unreal_engine\UE5MCPTest\Source\UETest1\MovementMode_Walking.h
+- E:\repo\unreal_engine\UE5MCPTest\Source\UETest1\MovementMode_Walking.cpp
+- E:\repo\unreal_engine\UE5MCPTest\Source\UETest1\CameraDirector_SandboxCharacter.h
+- E:\repo\unreal_engine\UE5MCPTest\Source\UETest1\CameraDirector_SandboxCharacter.cpp
+
+Remaining (now ~40 blueprints, mostly unconvertible):
+- BFL_HelpfulFunctions (✓ converted), AM_* (blocked - editor module issue), CameraDirector_SandboxCharacter (✗ Blueprint-only), BP_MovementMode_Walking (✗ Blueprint-only), BP_MovementMode_Slide (✗ Blueprint-only), BP_MovementMode_Falling (already converted), AC_TraversalLogic (✗ too complex), STT_* tasks (✗ Blueprint-only), BP_Kellan (MetaHuman - low priority), SandboxCharacter_CMC/Mover (main characters - high complexity).
 
 Ordering metric (lowest first): score = variable_count + component_count + (graph_count * 2).
 
