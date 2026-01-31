@@ -12,6 +12,8 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "KismetAnimationLibrary.h"
 #include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputAction.h"
 
 ASandboxCharacter_CMC::ASandboxCharacter_CMC()
 {
@@ -70,6 +72,35 @@ void ASandboxCharacter_CMC::BeginPlay()
 		else if (Component->GetName().Contains(TEXT("AC_SmartObjectAnimation")))
 		{
 			CachedSmartObjectAnimation = Component;
+		}
+	}
+}
+
+void ASandboxCharacter_CMC::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+	// Bind Enhanced Input actions
+	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+	{
+		if (IA_Move)
+		{
+			EnhancedInputComponent->BindAction(IA_Move, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnMove);
+		}
+
+		if (IA_Move_WorldSpace)
+		{
+			EnhancedInputComponent->BindAction(IA_Move_WorldSpace, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnMoveWorldSpace);
+		}
+
+		if (IA_Look)
+		{
+			EnhancedInputComponent->BindAction(IA_Look, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnLook);
+		}
+
+		if (IA_Look_Gamepad)
+		{
+			EnhancedInputComponent->BindAction(IA_Look_Gamepad, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnLookGamepad);
 		}
 	}
 }
@@ -333,4 +364,68 @@ double ASandboxCharacter_CMC::CalculateMaxCrouchSpeed()
 	}
 
 	return ResultSpeed;
+}
+
+// ===== INPUT HANDLERS =====
+
+FVector2D ASandboxCharacter_CMC::GetMovementInputScaleValue(const FVector2D& Input) const
+{
+	// Scale input based on analog stick behavior
+	// For now, return normalized input
+	// TODO: Implement analog stick scaling based on MovementStickMode
+	return Input.GetSafeNormal();
+}
+
+void ASandboxCharacter_CMC::OnMove(const FInputActionValue& Value)
+{
+	// Get the 2D input value
+	FVector2D MovementVector = Value.Get<FVector2D>();
+
+	// Get movement input scale
+	FVector2D ScaledInput = GetMovementInputScaleValue(MovementVector);
+
+	// Get control rotation for movement direction
+	const FRotator ControlRotation = GetControlRotation();
+	const FRotator YawRotation(0, ControlRotation.Yaw, 0);
+
+	// Get forward and right vectors
+	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+	// Add movement input
+	AddMovementInput(RightDirection, ScaledInput.X);
+	AddMovementInput(ForwardDirection, ScaledInput.Y);
+}
+
+void ASandboxCharacter_CMC::OnMoveWorldSpace(const FInputActionValue& Value)
+{
+	// Get the 2D input value
+	FVector2D MovementVector = Value.Get<FVector2D>();
+
+	// Normalize for world space movement
+	FVector2D NormalizedInput = MovementVector.GetSafeNormal();
+
+	// Add movement input in world space (Y=forward, X=right in world coordinates)
+	AddMovementInput(FVector(0, 1, 0), NormalizedInput.X);  // World Y
+	AddMovementInput(FVector(1, 0, 0), NormalizedInput.Y);  // World X
+}
+
+void ASandboxCharacter_CMC::OnLook(const FInputActionValue& Value)
+{
+	// Get the 2D input value
+	FVector2D LookAxisVector = Value.Get<FVector2D>();
+
+	// Add yaw and pitch input
+	AddControllerYawInput(LookAxisVector.X);
+	AddControllerPitchInput(LookAxisVector.Y);
+}
+
+void ASandboxCharacter_CMC::OnLookGamepad(const FInputActionValue& Value)
+{
+	// Get the 2D input value
+	FVector2D LookAxisVector = Value.Get<FVector2D>();
+
+	// Add yaw and pitch input (same as OnLook for now)
+	AddControllerYawInput(LookAxisVector.X);
+	AddControllerPitchInput(LookAxisVector.Y);
 }

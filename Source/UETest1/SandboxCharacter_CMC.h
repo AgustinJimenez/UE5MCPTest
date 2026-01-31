@@ -15,6 +15,8 @@ class UChildActorComponent;
 class UCurveFloat;
 class UAC_FoleyEvents;
 class UAC_VisualOverrideManager;
+class UInputAction;
+class UInputMappingContext;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRequestInteract);
 
@@ -88,6 +90,20 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Interaction")
 	FOnRequestInteract OnRequestInteract;
 
+	// ===== ENHANCED INPUT ACTIONS =====
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Move;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Move_WorldSpace;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Look;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Look_Gamepad;
+
 	// ===== INTERFACE IMPLEMENTATION =====
 
 	virtual FS_CharacterPropertiesForAnimation Get_PropertiesForAnimation_Implementation() override;
@@ -137,6 +153,17 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
+	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+
+	// ===== INPUT HANDLERS =====
+
+	void OnMove(const struct FInputActionValue& Value);
+	void OnMoveWorldSpace(const struct FInputActionValue& Value);
+	void OnLook(const struct FInputActionValue& Value);
+	void OnLookGamepad(const struct FInputActionValue& Value);
+
+	// Helper function to get movement input scale
+	FVector2D GetMovementInputScaleValue(const FVector2D& Input) const;
 
 	// ===== CACHED COMPONENTS =====
 
