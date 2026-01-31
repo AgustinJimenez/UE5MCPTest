@@ -193,6 +193,12 @@ Progress (Batch 1):
       - Reparented to C++, deleted UpdateLevelVisuals function graph, cleared event graph (5 nodes including custom events)
       - Result: 0 errors, 0 warnings
       - Note: Blueprint structs S_LevelStyle and S_GridMaterialParams couldn't be deleted via MCP (in use or circular dependency), can be manually deleted in editor if needed
+      - **CRITICAL ISSUE (2026-01-30)**: Level visuals not working at runtime - all blocks appear black/dark
+        - **Root cause**: Existing LevelVisuals actor instance in level has empty LevelStyles array
+        - **Why**: C++ constructor default initialization only applies to NEW instances, not existing blueprint instances created before C++ conversion
+        - **Component caching fix applied**: Changed from GetDefaultSubobjectByName() to FindComponentByClass() to properly find blueprint components
+        - **Solutions**: (1) Delete existing LevelVisuals actor and add new instance, OR (2) Manually populate LevelStyles array in Details panel with fog/block color configs
+        - **Lesson**: When converting blueprints with EditAnywhere arrays to C++, existing level instances lose their data during reparenting
   - **CRITICAL LIMITATION DISCOVERED - Orphaned Pins:**
     - **What**: When C++ function parameters are renamed (e.g., "Highlighted String" → "HighlightedString"), blueprint nodes retain connections to old pin names
     - **Why MCP can't fix**: Orphaned pin connection data is serialized in .uasset file, not accessible via Blueprint API

@@ -4,9 +4,6 @@
 #include "GameFramework/Actor.h"
 #include "BP_Twinblast.generated.h"
 
-class USceneComponent;
-class USkeletalMeshComponent;
-
 UCLASS()
 class UETEST1_API ABP_Twinblast : public AActor
 {
@@ -20,10 +17,4 @@ protected:
 
 private:
 	void HandleDeferredBeginPlay();
-
-	UPROPERTY(VisibleAnywhere)
-	USceneComponent* DefaultSceneRoot = nullptr;
-
-	UPROPERTY(VisibleAnywhere)
-	USkeletalMeshComponent* TwinBlast = nullptr;
 };

@@ -1,22 +1,12 @@
 #include "BP_Echo.h"
 
 #include "Components/SceneComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
 ABP_Echo::ABP_Echo()
 {
 	PrimaryActorTick.bCanEverTick = false;
-
-	DefaultSceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("DefaultSceneRoot"));
-	SetRootComponent(DefaultSceneRoot);
-
-	EchoBody = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("EchoBody"));
-	EchoBody->SetupAttachment(DefaultSceneRoot);
-
-	EchoHair = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("EchoHair"));
-	EchoHair->SetupAttachment(EchoBody);
 }
 
 void ABP_Echo::BeginPlay()

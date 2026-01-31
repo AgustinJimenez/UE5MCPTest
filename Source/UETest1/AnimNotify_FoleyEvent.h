@@ -16,6 +16,8 @@ class UETEST1_API UAnimNotify_FoleyEvent : public UAnimNotify
 public:
 	UAnimNotify_FoleyEvent();
 
+	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, const FAnimNotifyEventReference& EventReference) override;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foley")
 	FGameplayTag Event;
 

@@ -8,19 +8,54 @@ ALevelVisuals::ALevelVisuals()
 	PrimaryActorTick.bCanEverTick = false;
 
 	StyleIndex = 0;
+
+	// Add a default style if none exist
+	if (LevelStyles.Num() == 0)
+	{
+		FS_LevelStyle DefaultStyle;
+		DefaultStyle.FogColor = FLinearColor(0.5f, 0.7f, 1.0f); // Light blue fog
+		DefaultStyle.FogDensity = 0.02;
+		DefaultStyle.DecalColor = FLinearColor::White;
+
+		// Add default block colors
+		FS_GridMaterialParams WhiteParams;
+		WhiteParams.GridColor = FLinearColor(0.2f, 0.2f, 0.2f);
+		WhiteParams.SurfaceColor = FLinearColor::White;
+		WhiteParams.GridSizes = FVector(100.0, 100.0, 10.0);
+		WhiteParams.Specularity = 0.5;
+
+		FS_GridMaterialParams BlueParams;
+		BlueParams.GridColor = FLinearColor(0.1f, 0.1f, 0.3f);
+		BlueParams.SurfaceColor = FLinearColor(0.0f, 0.5f, 1.0f);
+		BlueParams.GridSizes = FVector(100.0, 100.0, 10.0);
+		BlueParams.Specularity = 0.5;
+
+		FS_GridMaterialParams GreenParams;
+		GreenParams.GridColor = FLinearColor(0.1f, 0.3f, 0.1f);
+		GreenParams.SurfaceColor = FLinearColor(0.0f, 1.0f, 0.0f);
+		GreenParams.GridSizes = FVector(100.0, 100.0, 10.0);
+		GreenParams.Specularity = 0.5;
+
+		DefaultStyle.BlockColors.Add(TEXT("None"), WhiteParams);
+		DefaultStyle.BlockColors.Add(TEXT("White"), WhiteParams);
+		DefaultStyle.BlockColors.Add(TEXT("Blue"), BlueParams);
+		DefaultStyle.BlockColors.Add(TEXT("Green"), GreenParams);
+
+		LevelStyles.Add(DefaultStyle);
+	}
 }
 
 void ALevelVisuals::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Cache components by name
-	CachedScene = Cast<USceneComponent>(GetDefaultSubobjectByName(TEXT("Scene")));
-	CachedSkyLight = Cast<USkyLightComponent>(GetDefaultSubobjectByName(TEXT("SkyLight")));
-	CachedDirectionalLight = Cast<UDirectionalLightComponent>(GetDefaultSubobjectByName(TEXT("DirectionalLight")));
-	CachedExponentialHeightFog = Cast<UExponentialHeightFogComponent>(GetDefaultSubobjectByName(TEXT("ExponentialHeightFog")));
-	CachedPostProcess = Cast<UPostProcessComponent>(GetDefaultSubobjectByName(TEXT("PostProcess")));
-	CachedDecal = Cast<UDecalComponent>(GetDefaultSubobjectByName(TEXT("Decal")));
+	// Cache blueprint components by class
+	CachedScene = GetRootComponent();
+	CachedSkyLight = FindComponentByClass<USkyLightComponent>();
+	CachedDirectionalLight = FindComponentByClass<UDirectionalLightComponent>();
+	CachedExponentialHeightFog = FindComponentByClass<UExponentialHeightFogComponent>();
+	CachedPostProcess = FindComponentByClass<UPostProcessComponent>();
+	CachedDecal = FindComponentByClass<UDecalComponent>();
 
 	UpdateLevelVisuals();
 }
@@ -29,13 +64,13 @@ void ALevelVisuals::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// Cache components by name during construction
-	CachedScene = Cast<USceneComponent>(GetDefaultSubobjectByName(TEXT("Scene")));
-	CachedSkyLight = Cast<USkyLightComponent>(GetDefaultSubobjectByName(TEXT("SkyLight")));
-	CachedDirectionalLight = Cast<UDirectionalLightComponent>(GetDefaultSubobjectByName(TEXT("DirectionalLight")));
-	CachedExponentialHeightFog = Cast<UExponentialHeightFogComponent>(GetDefaultSubobjectByName(TEXT("ExponentialHeightFog")));
-	CachedPostProcess = Cast<UPostProcessComponent>(GetDefaultSubobjectByName(TEXT("PostProcess")));
-	CachedDecal = Cast<UDecalComponent>(GetDefaultSubobjectByName(TEXT("Decal")));
+	// Cache blueprint components by class during construction
+	CachedScene = GetRootComponent();
+	CachedSkyLight = FindComponentByClass<USkyLightComponent>();
+	CachedDirectionalLight = FindComponentByClass<UDirectionalLightComponent>();
+	CachedExponentialHeightFog = FindComponentByClass<UExponentialHeightFogComponent>();
+	CachedPostProcess = FindComponentByClass<UPostProcessComponent>();
+	CachedDecal = FindComponentByClass<UDecalComponent>();
 
 	UpdateLevelVisuals();
 }

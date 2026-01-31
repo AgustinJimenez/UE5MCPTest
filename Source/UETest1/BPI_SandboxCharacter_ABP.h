@@ -20,7 +20,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "SandboxCharacter")
 	FPoseHistoryReference Get_PoseHistory();
 
-	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "SandboxCharacter")
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "SandboxCharacter", meta = (BlueprintThreadSafe))
 	FTransform Get_InteractionTransform();
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "SandboxCharacter")

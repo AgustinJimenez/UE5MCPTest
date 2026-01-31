@@ -1,19 +1,12 @@
 #include "BP_Quinn.h"
 
 #include "Components/SceneComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
 ABP_Quinn::ABP_Quinn()
 {
 	PrimaryActorTick.bCanEverTick = false;
-
-	DefaultSceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("DefaultSceneRoot"));
-	SetRootComponent(DefaultSceneRoot);
-
-	SkeletalMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("SkeletalMesh"));
-	SkeletalMesh->SetupAttachment(DefaultSceneRoot);
 }
 
 void ABP_Quinn::BeginPlay()

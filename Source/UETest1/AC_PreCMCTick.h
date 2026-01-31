@@ -17,7 +17,7 @@ public:
 	UPROPERTY(EditInstanceOnly, Category = "Pre CMC Tick", meta = (DisplayName = "As CBP Sandbox Character"))
 	TObjectPtr<AActor> AsCBPSandboxCharacter;
 
-	UPROPERTY(EditInstanceOnly, BlueprintAssignable, Category = "Pre CMC Tick")
+	UPROPERTY(EditInstanceOnly, BlueprintAssignable, BlueprintCallable, Category = "Pre CMC Tick")
 	FPreCMCTick Tick;
 
 protected:

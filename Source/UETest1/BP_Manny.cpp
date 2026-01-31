@@ -1,19 +1,12 @@
 #include "BP_Manny.h"
 
 #include "Components/SceneComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
 ABP_Manny::ABP_Manny()
 {
 	PrimaryActorTick.bCanEverTick = false;
-
-	DefaultSceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("DefaultSceneRoot"));
-	SetRootComponent(DefaultSceneRoot);
-
-	Manny = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Manny"));
-	Manny->SetupAttachment(DefaultSceneRoot);
 }
 
 void ABP_Manny::BeginPlay()

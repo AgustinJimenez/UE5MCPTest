@@ -1,19 +1,12 @@
 #include "BP_Twinblast.h"
 
 #include "Components/SceneComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
 ABP_Twinblast::ABP_Twinblast()
 {
 	PrimaryActorTick.bCanEverTick = false;
-
-	DefaultSceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("DefaultSceneRoot"));
-	SetRootComponent(DefaultSceneRoot);
-
-	TwinBlast = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("TwinBlast"));
-	TwinBlast->SetupAttachment(DefaultSceneRoot);
 }
 
 void ABP_Twinblast::BeginPlay()
