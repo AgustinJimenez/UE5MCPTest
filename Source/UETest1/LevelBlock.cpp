@@ -14,21 +14,32 @@ ALevelBlock::ALevelBlock()
 	// Initialize defaults
 	AutoNameFromHeight = false;
 	UseLevelVisualsColor = false;
+
+	// Set default material params so blocks aren't black
+	MaterialParams.GridColor = FLinearColor(0.2f, 0.2f, 0.2f);
+	MaterialParams.SurfaceColor = FLinearColor::White;
+	MaterialParams.GridSizes = FVector(100.0, 100.0, 10.0);
+	MaterialParams.Specularity = 0.5;
 }
 
 void ALevelBlock::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// Cache components
-	CachedDefaultSceneRoot = Cast<USceneComponent>(GetDefaultSubobjectByName(TEXT("DefaultSceneRoot")));
-	CachedStaticMesh = Cast<UStaticMeshComponent>(GetDefaultSubobjectByName(TEXT("StaticMesh")));
-	CachedTextRender = Cast<UTextRenderComponent>(GetDefaultSubobjectByName(TEXT("TextRender")));
+	// Cache blueprint components
+	CachedDefaultSceneRoot = GetRootComponent();
+	CachedStaticMesh = FindComponentByClass<UStaticMeshComponent>();
+	CachedTextRender = FindComponentByClass<UTextRenderComponent>();
 
 	// Create dynamic material instance
-	if (CachedStaticMesh && BaseMaterial)
+	if (CachedStaticMesh)
 	{
-		DynamicMaterial = CachedStaticMesh->CreateDynamicMaterialInstance(0, BaseMaterial);
+		// Use BaseMaterial if set, otherwise use the existing material on the mesh
+		UMaterialInterface* MaterialToUse = BaseMaterial ? BaseMaterial.Get() : CachedStaticMesh->GetMaterial(0);
+		if (MaterialToUse)
+		{
+			DynamicMaterial = CachedStaticMesh->CreateDynamicMaterialInstance(0, MaterialToUse);
+		}
 	}
 
 	// Apply material parameters
