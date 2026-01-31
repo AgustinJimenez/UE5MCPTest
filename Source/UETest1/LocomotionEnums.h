@@ -47,6 +47,15 @@ enum class E_MovementDirection : uint8
 };
 
 UENUM(BlueprintType)
+enum class E_AnalogStickBehavior : uint8
+{
+	FixedSpeed_SingleGait UMETA(DisplayName = "Fixed Speed - Single Gait"),
+	FixedSpeed_WalkRun UMETA(DisplayName = "Fixed Speed - Walk / Run"),
+	VariableSpeed_SingleGait UMETA(DisplayName = "Variable Speed - Single Gait"),
+	VariableSpeed_WalkRun UMETA(DisplayName = "Variable Speed - Walk / Run"),
+};
+
+UENUM(BlueprintType)
 enum class E_CameraStyle : uint8
 {
 	Close UMETA(DisplayName = "Close"),
