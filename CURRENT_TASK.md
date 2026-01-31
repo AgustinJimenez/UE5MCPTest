@@ -295,8 +295,16 @@ Blockers / Notes:
   - Will be resolved as blueprint logic is converted to C++ in subsequent phases
   - Blueprint compiles with errors but C++ foundation is solid
 
-**Phase 2: Core Movement Functions** 🔄 IN PROGRESS
-- Next: Convert 8 functions (physics calculators + gait system)
+**Phase 2: Core Movement Functions** ✅ COMPLETE
+- Implemented all 8 functions:
+  - **Physics Calculators**: HasMovementInputVector, CalculateBrakingDeceleration, CalculateBrakingFriction, CalculateGroundFriction, CalculateMaxAcceleration
+  - **Gait/Speed System**: GetDesiredGait, CanSprint, CalculateMaxSpeed, CalculateMaxCrouchSpeed
+- Added AnimGraphRuntime module dependency
+- All functions compile successfully
+
+**Phase 3: Movement Update Loop** 🔜 NEXT
+- Convert Tick/Update functions
+- Integrate C++ functions into movement system
 
 Remaining (now ~40 blueprints, mostly unconvertible):
 - BFL_HelpfulFunctions (✓ converted), AM_* (blocked - editor module issue), CameraDirector_SandboxCharacter (✗ Blueprint-only), BP_MovementMode_Walking (✗ Blueprint-only), BP_MovementMode_Slide (✗ Blueprint-only), BP_MovementMode_Falling (already converted), AC_TraversalLogic (✗ too complex), STT_* tasks (✗ Blueprint-only), BP_Kellan (MetaHuman - low priority), SandboxCharacter_CMC/Mover (main characters - high complexity).

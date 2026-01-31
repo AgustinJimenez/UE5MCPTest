@@ -95,6 +95,45 @@ public:
 	virtual FS_CharacterPropertiesForTraversal Get_PropertiesForTraversal_Implementation() override;
 	virtual void Set_CharacterInputState_Implementation(FS_PlayerInputState DesiredInputState) override;
 
+	// ===== PHYSICS CALCULATION FUNCTIONS =====
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Physics")
+	double CalculateMaxAcceleration() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Physics")
+	double CalculateBrakingDeceleration() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Physics")
+	double CalculateBrakingFriction() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Physics")
+	double CalculateGroundFriction() const;
+
+	UFUNCTION(BlueprintPure, Category = "Movement|Input")
+	bool HasMovementInputVector() const;
+
+	// ===== GAIT/SPEED SYSTEM =====
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Gait")
+	E_Gait GetDesiredGait();
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Speed")
+	double CalculateMaxSpeed();
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Speed")
+	double CalculateMaxCrouchSpeed();
+
+	UFUNCTION(BlueprintPure, Category = "Movement|Gait")
+	bool CanSprint() const;
+
+	// ===== INTERNAL STATE =====
+
+	UPROPERTY(BlueprintReadWrite, Category = "Movement|State")
+	bool FullMovementInput;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Movement|State")
+	float StrafeSpeedMap;
+
 protected:
 	virtual void BeginPlay() override;
 
