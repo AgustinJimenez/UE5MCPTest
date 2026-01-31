@@ -74,6 +74,36 @@ void ASandboxCharacter_CMC::BeginPlay()
 	}
 }
 
+void ASandboxCharacter_CMC::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// Update Gait based on input and sprint conditions
+	Gait = GetDesiredGait();
+
+	// Update movement physics properties
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		// Set max speed based on gait and direction
+		CMC->MaxWalkSpeed = CalculateMaxSpeed();
+
+		// Set crouch speed
+		CMC->MaxWalkSpeedCrouched = CalculateMaxCrouchSpeed();
+
+		// Set acceleration
+		CMC->MaxAcceleration = CalculateMaxAcceleration();
+
+		// Set braking deceleration
+		CMC->BrakingDecelerationWalking = CalculateBrakingDeceleration();
+
+		// Set braking friction
+		CMC->BrakingFrictionFactor = CalculateBrakingFriction();
+
+		// Set ground friction
+		CMC->GroundFriction = CalculateGroundFriction();
+	}
+}
+
 // Interface stub implementations (Phase 1)
 FS_CharacterPropertiesForAnimation ASandboxCharacter_CMC::Get_PropertiesForAnimation_Implementation()
 {
