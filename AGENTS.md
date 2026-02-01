@@ -208,7 +208,7 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 
 **Level Actor Property Preservation Commands (Sprint 2 - 2026-02-01):**
 - `read_actor_properties` - Read all EditAnywhere properties from a level actor instance. Returns JSON object with property name-value pairs. Use this to preserve actor configuration before blueprint reparenting.
-- `set_actor_properties` - Set EditAnywhere properties on a level actor instance. Accepts JSON object with property name-value pairs (as returned by read_actor_properties). Also triggers `RerunConstructionScripts()` to apply OnConstruction logic.
+- `set_actor_properties` - Set EditAnywhere properties on a level actor instance. Accepts JSON object with property name-value pairs (as returned by read_actor_properties). Does NOT trigger reconstruction - use `reconstruct_actor` separately if needed.
 - `reconstruct_actor` - Trigger OnConstruction on a level actor by calling `RerunConstructionScripts()`. Use this after reparenting blueprints to C++ to apply C++ initialization logic (e.g., UpdateLevelVisuals, UpdateMaterials) to existing level instances that weren't automatically updated.
 
 **Interface Function Parameter Modification (2026-02-01):**
@@ -257,13 +257,13 @@ await reparent_blueprint({
 });
 await compile_blueprint({ path: "/Game/Levels/LevelPrototyping/LevelVisuals" });
 
-// Step 3: Restore properties (also triggers RerunConstructionScripts)
+// Step 3: Restore properties
 await set_actor_properties({
   actor_name: "LevelVisuals_C_6",
   properties: props.properties
 });
 
-// Step 4: If visuals still not applied, explicitly reconstruct
+// Step 4: Trigger OnConstruction to apply visual changes
 await reconstruct_actor({ actor_name: "LevelVisuals_C_6" });
 
 // Step 5: Save level

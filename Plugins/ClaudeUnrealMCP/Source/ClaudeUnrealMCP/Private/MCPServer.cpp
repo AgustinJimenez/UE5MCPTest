@@ -4118,9 +4118,6 @@ FString FMCPServer::HandleSetActorProperties(const TSharedPtr<FJsonObject>& Para
 		PropertiesSet++;
 	}
 
-	// Rerun construction scripts to trigger OnConstruction (applies property changes like UpdateLevelVisuals)
-	FoundActor->RerunConstructionScripts();
-
 	// Mark the actor for saving
 	FoundActor->MarkPackageDirty();
 
