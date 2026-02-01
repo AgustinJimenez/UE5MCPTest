@@ -9,7 +9,7 @@ public class UETest1 : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "GameplayTags", "AIModule", "Mover", "MotionWarping", "PoseSearch", "StateTreeModule", "GameplayStateTreeModule", "GameplayInteractionsModule", "SmartObjectsModule", "GameplayTasks", "NavigationSystem", "DrawDebugLibrary", "Landscape", "AnimGraphRuntime" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "GameplayTags", "AIModule", "Mover", "MotionWarping", "PoseSearch", "StateTreeModule", "GameplayStateTreeModule", "GameplayInteractionsModule", "SmartObjectsModule", "GameplayTasks", "NavigationSystem", "DrawDebugLibrary", "Landscape", "AnimGraphRuntime", "GameplayCameras" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 

@@ -9,7 +9,7 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 **All 108 blueprints compile with 0 errors.**
 
 ### Work Completed
-- ✅ 40+ blueprints converted to C++ (AnimNotifies, teleporters, characters, smart objects, controllers, etc.)
+- ✅ 52+ blueprints converted to C++ (AnimNotifies, teleporters, characters, smart objects, controllers, MovementModes, etc.)
 - ✅ MCP tools for interface modification: `list_structs`, `modify_interface_function_parameter`
 - ✅ MCP tools for property preservation: `read_actor_properties`, `set_actor_properties`
 - ✅ C++ structs registered in UETest1 module startup for MCP discovery
@@ -19,7 +19,9 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 | Category | Count | Status |
 |----------|-------|--------|
 | **Need Function Graphs Moved to C++** | 0 | ✅ All done |
-| **Cannot Convert** (Blueprint-only bases) | ~15 | MovementModes (SmoothWalkingMode), CameraDirector, StateTree tasks, AnimModifiers |
+| **Cannot Convert** (Blueprint-only bases) | 0 | All previously blocked blueprints now have workarounds |
+| **Workaround Applied** (MovementModes + CameraDirector) | 3 | BP_MovementMode_Walking, BP_MovementMode_Slide, CameraDirector_SandboxCharacter |
+| **Already Converted** (StateTree) | 10 | STT_*, STE_*, STC_* classes now have C++ parents |
 | **Too Complex** (100K+ char graphs) | ~5 | AC_TraversalLogic, STT_FindSmartObject, AC_SmartObjectAnimation |
 | **Already Have C++ Parents** | ~25 | Blueprint instances configuring C++ classes |
 
@@ -29,6 +31,8 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 - ✅ **LevelButton** - Reparented to ALevelButton
 - ✅ **MCP Fix** - Added `RerunConstructionScripts()` call to `set_actor_properties` and new `reconstruct_actor` command
 - ✅ **GM_Sandbox** - CyclePawn/CycleVisualOverride moved to C++, event graph cleared (0 errors)
+- ✅ **BP_MovementMode_Walking** - Full smooth walking reimplementation (workaround for USmoothWalkingMode linker error)
+- ✅ **BP_MovementMode_Slide** - Inherits from Walking with slide-specific defaults
 
 ### Known Issue - Level Visuals Not Applied After Reparenting
 **Symptom:** Blocks appear yellowish/orange, no purple fog, lighting looks wrong after reparenting LevelVisuals/LevelBlock to C++.
@@ -43,6 +47,61 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 **MCP Enhancements (2026-02-01):**
 - Added `reconstruct_actor` command - explicitly triggers `RerunConstructionScripts()` on any actor
 - Added `RerunConstructionScripts()` call to `set_actor_properties` - properties + reconstruction in one call
+
+---
+
+## ✅ SUCCESSFUL CONVERSION - MovementModes (2026-02-01)
+
+**Blueprints Converted:**
+- **BP_MovementMode_Walking** → `UBP_MovementMode_Walking` (full smooth walking behavior)
+- **BP_MovementMode_Slide** → `UBP_MovementMode_Slide` (inherits from Walking)
+
+**Challenge:** `USmoothWalkingMode` (Mover plugin) causes **linker errors** - constructors not exported.
+- Header IS accessible: `#include "DefaultMovementSet/Modes/SmoothWalkingMode.h"` compiles
+- But linker fails: `USmoothWalkingMode::USmoothWalkingMode(FVTableHelper&)` undefined
+- Root cause: Class uses `GENERATED_BODY()` without `MinimalAPI` - constructors stay private to module
+
+**Workaround - Full Reimplementation:**
+1. Inherit from `UWalkingMode` (which HAS `MinimalAPI` and `GENERATED_UCLASS_BODY()`)
+2. Copy all smooth walking properties from `USmoothWalkingMode`
+3. Copy the smooth movement logic from engine source (`SmoothWalkingMode.cpp`)
+4. Create our own `FCustomSmoothWalkingState` struct (engine's is in Private folder)
+
+**Files Created:**
+- `Source/UETest1/BP_MovementMode_Walking.h/.cpp` - Full smooth walking implementation
+- `Source/UETest1/BP_MovementMode_Slide.h/.cpp` - Slide variant with custom defaults
+- `Source/UETest1/CustomSmoothWalkingState.h` - State struct for spring interpolation
+
+**Key Insight:** When a UE plugin class has linker errors due to unexported constructors, you can often work around it by:
+1. Finding an exported parent class higher in the hierarchy
+2. Reimplementing the missing functionality in your own class
+3. Creating your own versions of any private structs/types needed
+
+---
+
+## ✅ SUCCESSFUL CONVERSION - CameraDirector (2026-02-01)
+
+**Blueprint Converted:**
+- **CameraDirector_SandboxCharacter** → `UCameraDirector_SandboxCharacter`
+
+**Challenge:** `UBlueprintCameraDirectorEvaluator` (GameplayCameras plugin) has `MinimalAPI` but `GetWorld()` is not exported.
+- Header IS accessible: `#include "Directors/BlueprintCameraDirector.h"` compiles
+- But linker fails: `UBlueprintCameraDirectorEvaluator::GetWorld()` undefined
+- Root cause: `GetWorld()` is virtual but not exported from the module
+
+**Workaround - Override GetWorld():**
+1. Inherit from `UBlueprintCameraDirectorEvaluator` (which HAS `MinimalAPI`)
+2. Override `GetWorld()` with our own implementation that gets world from outer object chain
+3. Add `GameplayCameras` module to Build.cs dependencies
+
+**Files Created:**
+- `Source/UETest1/CameraDirector_SandboxCharacter.h` - Class declaration with GetWorld override
+- `Source/UETest1/CameraDirector_SandboxCharacter.cpp` - GetWorld implementation via Outer->GetWorld()
+
+**Key Insight:** When a UE plugin class has linker errors due to unexported virtual methods, you can often work around it by:
+1. Inheriting from the class (if it has MinimalAPI for constructors)
+2. Overriding the problematic method with your own implementation
+3. Using alternative means to get the same data (e.g., GetOuter()->GetWorld() instead of base GetWorld())
 
 ---
 
@@ -646,11 +705,14 @@ Blockers / Notes:
 
 **Conversion Session 2026-01-31:**
 - **Cannot Convert - Blueprint-Only Base Classes:**
-  - **CameraDirector_SandboxCharacter**: Inherits from BlueprintCameraDirectorEvaluator which isn't available in C++ in UE 5.7 (GameplayCameras plugin exists but headers not accessible)
-  - **BP_MovementMode_Walking**: Inherits from SmoothWalkingMode (Mover plugin) - header not accessible in C++, should remain as Blueprint
-  - **BP_MovementMode_Slide**: Also inherits from SmoothWalkingMode - same issue
-  - **StateTree Tasks** (STT_*): Inherit from StateTreeTaskBlueprintBase - Blueprint-only base class
-  - **StateTree Evaluators** (STE_*): Inherit from StateTreeEvaluatorBlueprintBase - Blueprint-only base class
+  - ~~**CameraDirector_SandboxCharacter**~~: ✅ CONVERTED (2026-02-01) - Workaround: override GetWorld() in derived class
+  - ~~**BP_MovementMode_Walking**~~: ✅ CONVERTED (2026-02-01) - Workaround: inherit from UWalkingMode, reimplement smooth walking
+  - ~~**BP_MovementMode_Slide**~~: ✅ CONVERTED (2026-02-01) - Inherits from our UBP_MovementMode_Walking
+
+- **Already Converted - StateTree Tasks/Evaluators (10 classes):**
+  - **STT_*** and **STE_*** classes ARE already C++ (despite "BlueprintBase" suffix in parent class name)
+  - `UStateTreeTaskBlueprintBase` is designed for C++ implementations that integrate with Blueprint editor
+  - C++ files exist: STT_SetCharacterInputState, STT_AddCooldown, STT_ClaimSlot, STT_ClearFocus, STT_FindRandomLocation, STT_FocusToTarget, STT_UseSmartObject, STT_CharacterIgnoreCollisionsWithOtherActor, STE_GetAIData, STC_CheckCooldown
 
 - **Cannot Convert - Very Complex Logic:**
   - **AC_TraversalLogic**: Event graph is 123,690 characters (38,130 tokens) - impractically complex for conversion
@@ -662,9 +724,9 @@ Blockers / Notes:
   - Most AnimNotifies, SmartObjects, retargeted characters already converted
   - These are Blueprint instances that configure/override C++ classes
 
-- **Conversion Status Summary (2026-01-31):**
-  - **Successfully converted to C++**: 40+ blueprints (LevelBlock, LevelVisuals, LevelBlock_Traversable, GM_Sandbox, teleporter system, character variants, player controller, level utilities, foley system, smart objects)
-  - **Cannot convert**: ~10 blueprints (Blueprint-only base classes, movement modes, camera directors, state tree tasks)
+- **Conversion Status Summary (Updated 2026-02-01):**
+  - **Successfully converted to C++**: 53+ blueprints (LevelBlock, LevelVisuals, LevelBlock_Traversable, GM_Sandbox, teleporter system, character variants, player controller, level utilities, foley system, smart objects, StateTree tasks/evaluators, MovementModes, CameraDirector)
+  - **Cannot convert**: 0 blueprints (all previously blocked now have workarounds)
   - **Impractical to convert**: ~5 blueprints (very complex event graphs >100K characters)
   - **Already C++ parents**: ~25 blueprints (just Blueprint instances of C++ classes)
   - **Remaining convertible**: Few if any - most practical conversions complete
@@ -676,11 +738,13 @@ Blockers / Notes:
   - Added GameplayCameras module to Build.cs
   - Multiple include path attempts all failed (headers don't exist)
   - Conclusion: This class uses Blueprint-only GameplayCameras API
-- Attempted: BP_MovementMode_Walking - FAILED (SmoothWalkingMode header not accessible)
-  - Created MovementMode_Walking.h/cpp files
-  - Multiple include path attempts failed
-  - Conclusion: Mover plugin movement modes should remain as Blueprints
-  - **ACTION REQUIRED**: Delete MovementMode_Walking.h and MovementMode_Walking.cpp files
+- Attempted: BP_MovementMode_Walking - FAILED (linker error, not header issue)
+  - Created BP_MovementMode_Walking.h/cpp files with `#include "DefaultMovementSet/Modes/SmoothWalkingMode.h"`
+  - Header compiles fine (Mover module is in PublicDependencyModuleNames)
+  - **Linker error**: `USmoothWalkingMode::USmoothWalkingMode(FVTableHelper&)` undefined
+  - Root cause: `USmoothWalkingMode` uses `GENERATED_BODY()` without `MinimalAPI` - constructors not exported
+  - Compare with working `UFallingMode` which has `MinimalAPI` + `GENERATED_UCLASS_BODY()`
+  - Conclusion: Mover plugin movement modes should remain as Blueprints (Epic designed it for Blueprint-only extension)
 
 **SandboxCharacter_CMC Conversion Progress (2026-01-31):**
 
@@ -788,11 +852,17 @@ Create files in `Source/UETest1/`:
 - Level utilities, foley system, smart objects
 - BFL_HelpfulFunctions, AC_FoleyEvents, PC_Sandbox, etc.
 
-**Cannot Convert - Blueprint-Only Base Classes (✗ ~10 blueprints):**
-- CameraDirector_SandboxCharacter (BlueprintCameraDirectorEvaluator - GameplayCameras plugin)
-- BP_MovementMode_Walking, BP_MovementMode_Slide (SmoothWalkingMode - Mover plugin)
-- All STT_* StateTree tasks (StateTreeTaskBlueprintBase)
-- All STE_* StateTree evaluators (StateTreeEvaluatorBlueprintBase)
+**Cannot Convert - Blueprint-Only Base Classes (✗ 0 blueprints):**
+- ~~CameraDirector_SandboxCharacter~~ - ✅ CONVERTED (2026-02-01) via GetWorld() override workaround
+
+**Successfully Converted via Workaround (✓ 2 blueprints):**
+- BP_MovementMode_Walking, BP_MovementMode_Slide - Reimplemented USmoothWalkingMode behavior by inheriting from UWalkingMode
+
+**Already Converted - StateTree Tasks/Evaluators (✓ 10 classes):**
+- STT_SetCharacterInputState, STT_AddCooldown, STT_ClaimSlot, STT_ClearFocus, STT_FindRandomLocation
+- STT_FocusToTarget, STT_UseSmartObject, STT_CharacterIgnoreCollisionsWithOtherActor
+- STE_GetAIData, STC_CheckCooldown
+- Note: `UStateTreeTaskBlueprintBase` IS designed for C++ implementations (despite "BlueprintBase" suffix)
 
 **Cannot Convert - Too Complex (✗ ~5 blueprints):**
 - AC_TraversalLogic (123,690 chars event graph)
