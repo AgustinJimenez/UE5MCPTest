@@ -73,6 +73,44 @@ The goal is **full C++ conversion** of the entire project, not partial conversio
 
 ---
 
+## INTERFACE PARAMETER MODIFICATION MCP FEATURE (2026-02-01)
+
+**New MCP Commands Implemented:**
+- `list_structs` - Debug command to list all registered UScriptStruct objects matching a pattern
+- `modify_interface_function_parameter` - Modify parameter types in Blueprint Interface functions
+
+**Key Discovery - UE Reflection Behavior:**
+- UE strips the 'F' prefix from C++ struct names in reflection
+  - `FS_PlayerInputState` (C++ source) → `S_PlayerInputState` (reflection name)
+  - `FS_CharacterPropertiesForAnimation` (C++ source) → `S_CharacterPropertiesForAnimation` (reflection name)
+
+**Critical Finding - Blueprint vs C++ Struct Incompatibility:**
+- Even with identical names and fields, Blueprint structs (`/Game/...`) and C++ structs (`/Script/...`) are NOT compatible
+- Changing an interface to use C++ struct causes "Only exactly matching structures are considered compatible" errors
+- **All consuming blueprints must also be updated** to use the matching struct type
+
+**Usage Example:**
+```javascript
+// List available structs
+list_structs({ pattern: "CharacterPropertiesForAnimation" })
+// Returns both Blueprint (/Game/...) and C++ (/Script/...) versions
+
+// Modify interface parameter (use C++ struct path from list_structs)
+modify_interface_function_parameter({
+  interface_path: "/Game/Blueprints/BPI_SandboxCharacter_Pawn.BPI_SandboxCharacter_Pawn",
+  function_name: "Get_PropertiesForAnimation",
+  parameter_name: "ReturnValue",
+  new_type: "/Script/UETest1.S_CharacterPropertiesForAnimation",  // Note: S_ not FS_
+  is_output: true
+})
+```
+
+**Struct Registration for MCP Discovery:**
+- Added `StartupModule()` to UETest1 module that calls `StaticStruct()` on project C++ structs
+- This ensures C++ structs are discoverable via `list_structs` command
+
+---
+
 ## CONTENT FOLDER RESET - RECONVERSION NEEDED (2026-02-01)
 
 **Situation:** Content folder was restored from functional backup, resetting many blueprints back to blueprint-only state. However, C++ source files in `/Source/UETest1/` were NOT reset and still exist.
