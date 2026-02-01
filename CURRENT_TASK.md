@@ -23,7 +23,7 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 | **Workaround Applied** (MovementModes + CameraDirector) | 3 | BP_MovementMode_Walking, BP_MovementMode_Slide, CameraDirector_SandboxCharacter |
 | **Already Converted** (StateTree) | 10 | STT_*, STE_*, STC_* classes now have C++ parents |
 | **Too Complex** (100K+ char graphs) | ~5 | AC_TraversalLogic, STT_FindSmartObject, AC_SmartObjectAnimation |
-| **Already Have C++ Parents** | ~25 | Blueprint instances configuring C++ classes |
+| **Already Have C++ Parents** | ~25 | Blueprint wrappers - see analysis below |
 
 ### Recently Completed (2026-02-01)
 - ✅ **LevelVisuals** - Reparented to ALevelVisuals, properties restored
@@ -35,6 +35,34 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 - ✅ **BP_MovementMode_Slide** - Inherits from Walking with slide-specific defaults
 - ✅ **CameraDirector_SandboxCharacter** - Override GetWorld() workaround for unexported method
 - ✅ **Auto-Reconstruct LevelVisuals** - MCP plugin auto-refreshes block colors on ANY blueprint compile
+
+### Analysis: "Already Have C++ Parents" Blueprints (2026-02-01)
+
+These ~25 blueprints have C++ classes created but the blueprints still exist. Analysis reveals two subcategories:
+
+**1. Pure Configuration Blueprints (Foley Notifies - 10 blueprints)**
+- Examples: `BP_AnimNotify_FoleyEvent_Walk_L`, `BP_AnimNotify_FoleyEvent_Run_R`, etc.
+- C++ classes exist: `AnimNotify_FoleyEventVariants.h` has all 10 variants
+- Blueprint content: Just default property values (Event tag, Side, DebugText)
+- **Status**: Blueprints are REDUNDANT - C++ classes set same defaults in constructors
+- **Issue**: Animation assets reference the blueprint classes, not C++ classes
+- **To fully convert**: Would need to update all animation montages/sequences to use C++ notify classes instead
+
+**2. Residual Logic Blueprints (Retargeted Characters - 5 blueprints)**
+- Examples: `BP_Manny`, `BP_Quinn`, `BP_Twinblast`, `BP_UE4_Mannequin`, `BP_Echo`
+- C++ classes exist: `BP_Manny.h`, etc.
+- Blueprint content: Still has event graph with tick prerequisite setup (12 nodes)
+- **Status**: Logic should be in C++ already, blueprint event graphs should be CLEARED
+- **To fully convert**: Clear event graphs, verify C++ handles the logic
+
+**Decision Options:**
+1. **Delete redundant blueprints** - Replace all content references with C++ classes (time-consuming content migration)
+2. **Clean up residual logic** - Clear event graphs from blueprints that have C++ parents (quick cleanup)
+3. **Leave as-is** - Blueprints work fine as thin wrappers, just adds indirection layer
+
+**Recommendation**: Option 2 (clean up residual logic) is quickest win. Option 1 requires content migration which is risky.
+
+---
 
 ### ✅ RESOLVED - Level Visuals Auto-Reconstruct (2026-02-01)
 **Previous Issue:** Blocks appeared gray/yellow after blueprint compilation because LevelVisuals materials weren't being refreshed.
