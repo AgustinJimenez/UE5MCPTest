@@ -47,6 +47,51 @@ enum class E_MovementDirection : uint8
 };
 
 UENUM(BlueprintType)
+enum class E_MovementState : uint8
+{
+	Idle UMETA(DisplayName = "Idle"),
+	Moving UMETA(DisplayName = "Moving"),
+};
+
+UENUM(BlueprintType)
+enum class E_MovementDirectionBias : uint8
+{
+	LeftFootForward UMETA(DisplayName = "LeftFootForward"),
+	RightFootForward UMETA(DisplayName = "RightFootForward"),
+};
+
+UENUM(BlueprintType)
+enum class E_ExperimentalStateMachineState : uint8
+{
+	IdleLoop UMETA(DisplayName = "Idle Loop"),
+	TransitionToIdleLoop UMETA(DisplayName = "Transition to Idle Loop"),
+	LocomotionLoop UMETA(DisplayName = "Locomotion Loop"),
+	TransitionToLocomotionLoop UMETA(DisplayName = "Transition to Locomotion Loop"),
+	InAirLoop UMETA(DisplayName = "In Air Loop"),
+	TransitionToInAirLoop UMETA(DisplayName = "Transition to In Air Loop"),
+	IdleBreak UMETA(DisplayName = "Idle Break"),
+	TransitionToSlide UMETA(DisplayName = "Transition to Slide"),
+	SlideLoop UMETA(DisplayName = "Slide Loop"),
+};
+
+UENUM(BlueprintType)
+enum class E_TraversalActionType : uint8
+{
+	None UMETA(DisplayName = "None"),
+	Hurdle UMETA(DisplayName = "Hurdle"),
+	Vault UMETA(DisplayName = "Vault"),
+	Mantle UMETA(DisplayName = "Mantle"),
+};
+
+UENUM(BlueprintType)
+enum class E_FoleyEventSide : uint8
+{
+	None UMETA(DisplayName = "None"),
+	Left UMETA(DisplayName = "Left"),
+	Right UMETA(DisplayName = "Right"),
+};
+
+UENUM(BlueprintType)
 enum class E_AnalogStickBehavior : uint8
 {
 	FixedSpeed_SingleGait UMETA(DisplayName = "Fixed Speed - Single Gait"),
