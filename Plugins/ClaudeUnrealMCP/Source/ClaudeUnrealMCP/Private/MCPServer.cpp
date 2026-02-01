@@ -1678,6 +1678,26 @@ FString FMCPServer::MakeError(const FString& Error)
 	return MakeResponse(false, nullptr, Error);
 }
 
+void FMCPServer::ReconstructLevelVisuals()
+{
+	// Auto-reconstruct LevelVisuals actors to refresh material colors after blueprint operations
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		return;
+	}
+
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (Actor && Actor->GetClass()->GetName().Contains(TEXT("LevelVisuals")))
+		{
+			Actor->RerunConstructionScripts();
+			UE_LOG(LogTemp, Log, TEXT("ClaudeUnrealMCP: Auto-reconstructed %s"), *Actor->GetName());
+		}
+	}
+}
+
 FString FMCPServer::HandleAddComponent(const TSharedPtr<FJsonObject>& Params)
 {
 	if (!Params.IsValid())
@@ -1965,6 +1985,9 @@ FString FMCPServer::HandleReparentBlueprint(const TSharedPtr<FJsonObject>& Param
 	UBlueprintEditorLibrary::ReparentBlueprint(Blueprint, NewParent);
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
+	// Auto-reconstruct LevelVisuals to refresh material colors
+	ReconstructLevelVisuals();
+
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("message"), TEXT("Blueprint reparented successfully"));
 	Data->SetStringField(TEXT("old_parent"), OldParent ? OldParent->GetName() : TEXT("None"));
@@ -2035,6 +2058,9 @@ FString FMCPServer::HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Params
 	Data->SetArrayField(TEXT("warnings"), WarningsArray);
 	Data->SetNumberField(TEXT("error_count"), ErrorsArray.Num());
 	Data->SetNumberField(TEXT("warning_count"), WarningsArray.Num());
+
+	// Auto-reconstruct LevelVisuals to refresh material colors
+	ReconstructLevelVisuals();
 
 	// Always return success=true so error details are visible
 	// The 'compiled' field indicates actual compilation status
@@ -2150,6 +2176,9 @@ FString FMCPServer::HandleSaveAll(const TSharedPtr<FJsonObject>& Params)
 
 	FString Message = FString::Printf(TEXT("Saved %d package(s), %d failed"), SavedCount, FailedCount);
 	Data->SetStringField(TEXT("message"), Message);
+
+	// Auto-reconstruct LevelVisuals to refresh material colors
+	ReconstructLevelVisuals();
 
 	if (FailedCount > 0)
 	{

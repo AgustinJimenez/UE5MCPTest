@@ -90,13 +90,19 @@ void ALevelVisuals::UpdateVisuals()
 
 void ALevelVisuals::UpdateLevelVisuals()
 {
-	// Validate StyleIndex
-	if (!LevelStyles.IsValidIndex(StyleIndex))
+	// Validate StyleIndex - fallback to 0 if invalid
+	int32 EffectiveStyleIndex = StyleIndex;
+	if (!LevelStyles.IsValidIndex(EffectiveStyleIndex))
 	{
-		return;
+		EffectiveStyleIndex = 0;
+		if (!LevelStyles.IsValidIndex(EffectiveStyleIndex))
+		{
+			// No valid styles at all
+			return;
+		}
 	}
 
-	const FS_LevelStyle& CurrentStyle = LevelStyles[StyleIndex];
+	const FS_LevelStyle& CurrentStyle = LevelStyles[EffectiveStyleIndex];
 
 	// Update fog settings
 	if (CachedExponentialHeightFog)

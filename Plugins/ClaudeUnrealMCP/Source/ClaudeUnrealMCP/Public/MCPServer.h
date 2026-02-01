@@ -14,6 +14,7 @@ public:
 
 	bool Start(int32 Port = 9877);
 	void Stop();
+	void ReconstructLevelVisuals();
 
 private:
 	bool HandleConnection(FSocket* ClientSocket, const FIPv4Endpoint& ClientEndpoint);

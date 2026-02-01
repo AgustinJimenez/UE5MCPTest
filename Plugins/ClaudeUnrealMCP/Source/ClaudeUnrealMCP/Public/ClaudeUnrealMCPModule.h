@@ -12,5 +12,8 @@ public:
 	virtual void ShutdownModule() override;
 
 private:
+	void OnBlueprintCompiled();
+
 	FMCPServer* Server = nullptr;
+	FDelegateHandle OnBlueprintCompiledHandle;
 };
