@@ -1,6 +1,8 @@
 #include "MCPServer.h"
 #include "Engine/Blueprint.h"
+#include "Animation/AnimBlueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Blueprint/BlueprintExtension.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
 #include "EdGraph/EdGraph.h"
@@ -8,6 +10,7 @@
 #include "EdGraph/EdGraphPin.h"
 #include "K2Node_Event.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_DynamicCast.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -257,6 +260,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleReadVariables(Params);
 	}
+	else if (Command == TEXT("read_class_defaults"))
+	{
+		return HandleReadClassDefaults(Params);
+	}
 	else if (Command == TEXT("read_components"))
 	{
 		return HandleReadComponents(Params);
@@ -371,6 +378,43 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	else if (Command == TEXT("capture_screenshot"))
 	{
 		return HandleCaptureScreenshot(Params);
+	}
+	else if (Command == TEXT("remove_error_nodes"))
+	{
+		return HandleRemoveErrorNodes(Params);
+	}
+	else if (Command == TEXT("clear_animation_blueprint_tags"))
+	{
+		return HandleClearAnimationBlueprintTags(Params);
+	}
+	else if (Command == TEXT("clear_anim_graph"))
+	{
+		return HandleClearAnimGraph(Params);
+	}
+	// Blueprint function creation commands (Sprint 1)
+	else if (Command == TEXT("create_blueprint_function"))
+	{
+		return HandleCreateBlueprintFunction(Params);
+	}
+	else if (Command == TEXT("add_function_input"))
+	{
+		return HandleAddFunctionInput(Params);
+	}
+	else if (Command == TEXT("add_function_output"))
+	{
+		return HandleAddFunctionOutput(Params);
+	}
+	else if (Command == TEXT("rename_blueprint_function"))
+	{
+		return HandleRenameBlueprintFunction(Params);
+	}
+	else if (Command == TEXT("read_actor_properties"))
+	{
+		return HandleReadActorProperties(Params);
+	}
+	else if (Command == TEXT("set_actor_properties"))
+	{
+		return HandleSetActorProperties(Params);
 	}
 
 	return MakeError(FString::Printf(TEXT("Unknown command: %s"), *Command));
@@ -499,6 +543,105 @@ FString FMCPServer::HandleReadVariables(const TSharedPtr<FJsonObject>& Params)
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetArrayField(TEXT("variables"), VarArray);
 	Data->SetNumberField(TEXT("count"), VarArray.Num());
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleReadClassDefaults(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("path")))
+	{
+		return MakeError(TEXT("Missing 'path' parameter"));
+	}
+
+	FString Path = Params->GetStringField(TEXT("path"));
+	UBlueprint* Blueprint = LoadBlueprintFromPath(Path);
+
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *Path));
+	}
+
+	// Get the generated class and its CDO
+	UClass* GeneratedClass = Blueprint->GeneratedClass;
+	if (!GeneratedClass)
+	{
+		return MakeError(TEXT("Blueprint has no generated class"));
+	}
+
+	UObject* CDO = GeneratedClass->GetDefaultObject();
+	if (!CDO)
+	{
+		return MakeError(TEXT("Failed to get class default object"));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> PropertyArray;
+
+	// Iterate through all properties (including inherited ones)
+	for (TFieldIterator<FProperty> PropIt(GeneratedClass); PropIt; ++PropIt)
+	{
+		FProperty* Property = *PropIt;
+
+		// Skip properties that are not editable or visible
+		if (!Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible))
+		{
+			continue;
+		}
+
+		TSharedPtr<FJsonObject> PropObj = MakeShared<FJsonObject>();
+		PropObj->SetStringField(TEXT("name"), Property->GetName());
+		PropObj->SetStringField(TEXT("type"), Property->GetCPPType());
+		PropObj->SetStringField(TEXT("category"), Property->GetMetaData(TEXT("Category")));
+
+		// Get the property value from CDO
+		void* PropertyValue = Property->ContainerPtrToValuePtr<void>(CDO);
+		FString ValueString;
+		Property->ExportTextItem_Direct(ValueString, PropertyValue, nullptr, nullptr, PPF_None);
+		PropObj->SetStringField(TEXT("value"), ValueString);
+
+		// Check if it's an object property
+		if (FObjectProperty* ObjectProp = CastField<FObjectProperty>(Property))
+		{
+			UObject* ObjectValue = ObjectProp->GetObjectPropertyValue(PropertyValue);
+			if (ObjectValue)
+			{
+				PropObj->SetStringField(TEXT("object_value"), ObjectValue->GetPathName());
+				PropObj->SetStringField(TEXT("object_class"), ObjectValue->GetClass()->GetName());
+			}
+		}
+		// Check if it's an array property
+		else if (FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property))
+		{
+			FScriptArrayHelper ArrayHelper(ArrayProp, PropertyValue);
+			PropObj->SetNumberField(TEXT("array_size"), ArrayHelper.Num());
+
+			// For object arrays, list the objects
+			if (FObjectProperty* InnerObjectProp = CastField<FObjectProperty>(ArrayProp->Inner))
+			{
+				TArray<TSharedPtr<FJsonValue>> ObjectArray;
+				for (int32 i = 0; i < ArrayHelper.Num(); ++i)
+				{
+					UObject* ArrayObject = InnerObjectProp->GetObjectPropertyValue(ArrayHelper.GetRawPtr(i));
+					if (ArrayObject)
+					{
+						TSharedPtr<FJsonObject> ArrayObjData = MakeShared<FJsonObject>();
+						ArrayObjData->SetStringField(TEXT("path"), ArrayObject->GetPathName());
+						ArrayObjData->SetStringField(TEXT("class"), ArrayObject->GetClass()->GetName());
+						ObjectArray.Add(MakeShared<FJsonValueObject>(ArrayObjData));
+					}
+				}
+				PropObj->SetArrayField(TEXT("array_values"), ObjectArray);
+			}
+		}
+
+		PropertyArray.Add(MakeShared<FJsonValueObject>(PropObj));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetArrayField(TEXT("properties"), PropertyArray);
+	Data->SetNumberField(TEXT("count"), PropertyArray.Num());
+	Data->SetStringField(TEXT("class_name"), GeneratedClass->GetName());
+	Data->SetStringField(TEXT("parent_class"), GeneratedClass->GetSuperClass() ? GeneratedClass->GetSuperClass()->GetName() : TEXT("None"));
 
 	return MakeResponse(true, Data);
 }
@@ -2549,4 +2692,944 @@ FString FMCPServer::HandleCaptureScreenshot(const TSharedPtr<FJsonObject>& Param
 	ResponseData->SetStringField(TEXT("filename"), TimestampedFilename + TEXT(".png"));
 
 	return MakeResponse(true, ResponseData);
+}
+
+FString FMCPServer::HandleRemoveErrorNodes(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")))
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' parameter"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	bool bAutoRewire = Params->HasField(TEXT("auto_rewire")) ? Params->GetBoolField(TEXT("auto_rewire")) : true;
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// First, compile to identify error nodes
+	FCompilerResultsLog CompileLog;
+	FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &CompileLog);
+
+	// Track nodes to remove
+	TArray<UEdGraphNode*> NodesToRemove;
+	int32 NodesRemoved = 0;
+	int32 ConnectionsRewired = 0;
+
+	// Get all graphs
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (!Graph) continue;
+
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node) continue;
+
+			bool bIsErrorNode = false;
+
+			// Check for bad cast nodes (invalid target type)
+			if (UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(Node))
+			{
+				// If the target class is null or invalid, this is a bad cast
+				if (CastNode->TargetType == nullptr)
+				{
+					bIsErrorNode = true;
+				}
+			}
+
+			// Check for function call nodes calling non-existent functions
+			if (UK2Node_CallFunction* FunctionNode = Cast<UK2Node_CallFunction>(Node))
+			{
+				// Check if the function reference is valid
+				UFunction* TargetFunction = FunctionNode->GetTargetFunction();
+				if (!TargetFunction && FunctionNode->FunctionReference.GetMemberName() != NAME_None)
+				{
+					// Function is referenced but doesn't exist
+					bIsErrorNode = true;
+				}
+			}
+
+			// Check node's own error state
+			if (Node->bHasCompilerMessage && Node->ErrorType >= EMessageSeverity::Error)
+			{
+				bIsErrorNode = true;
+			}
+
+			if (bIsErrorNode)
+			{
+				// Try to rewire execution flow around this node if requested
+				if (bAutoRewire)
+				{
+					UEdGraphPin* ExecInputPin = nullptr;
+					UEdGraphPin* ExecOutputPin = nullptr;
+
+					// Find execution pins
+					for (UEdGraphPin* Pin : Node->Pins)
+					{
+						if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec)
+						{
+							if (Pin->Direction == EGPD_Input)
+							{
+								ExecInputPin = Pin;
+							}
+							else if (Pin->Direction == EGPD_Output)
+							{
+								ExecOutputPin = Pin;
+							}
+						}
+					}
+
+					// If we have both input and output exec pins, try to rewire
+					if (ExecInputPin && ExecOutputPin && ExecInputPin->LinkedTo.Num() > 0 && ExecOutputPin->LinkedTo.Num() > 0)
+					{
+						UEdGraphPin* InputSource = ExecInputPin->LinkedTo[0];
+						UEdGraphPin* OutputTarget = ExecOutputPin->LinkedTo[0];
+
+						if (InputSource && OutputTarget)
+						{
+							InputSource->MakeLinkTo(OutputTarget);
+							ConnectionsRewired++;
+						}
+					}
+				}
+
+				NodesToRemove.Add(Node);
+			}
+		}
+	}
+
+	// Remove the bad nodes
+	for (UEdGraphNode* NodeToRemove : NodesToRemove)
+	{
+		if (NodeToRemove && NodeToRemove->GetGraph())
+		{
+			NodeToRemove->GetGraph()->RemoveNode(NodeToRemove);
+			NodesRemoved++;
+		}
+	}
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	// Recompile to verify fixes
+	FCompilerResultsLog PostCompileLog;
+	FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &PostCompileLog);
+
+	// For animation blueprints with tag errors, try removing disconnected nodes
+	int32 DisconnectedNodesRemoved = 0;
+	bool bHasTagErrors = false;
+	for (const TSharedRef<FTokenizedMessage>& Message : PostCompileLog.Messages)
+	{
+		if (Message->GetSeverity() == EMessageSeverity::Error)
+		{
+			FString ErrorText = Message->ToText().ToString();
+			if (ErrorText.Contains(TEXT("cannot find referenced node with tag")))
+			{
+				bHasTagErrors = true;
+				break;
+			}
+		}
+	}
+
+	if (bHasTagErrors && Blueprint->IsA<UAnimBlueprint>())
+	{
+		// Find and remove disconnected nodes in animation graphs
+		TArray<UEdGraph*> AnimGraphs;
+		Blueprint->GetAllGraphs(AnimGraphs);
+
+		for (UEdGraph* Graph : AnimGraphs)
+		{
+			if (!Graph || !Graph->GetName().Contains(TEXT("AnimGraph"))) continue;
+
+			// Find all nodes that are disconnected (no output connections)
+			TArray<UEdGraphNode*> DisconnectedNodes;
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (!Node) continue;
+
+				// Skip the root/output node
+				if (Node->GetClass()->GetName().Contains(TEXT("AnimGraphNode_Root"))) continue;
+
+				// Check if this node has any output pose connections
+				bool bHasOutputConnection = false;
+				for (UEdGraphPin* Pin : Node->Pins)
+				{
+					if (Pin && Pin->Direction == EGPD_Output && Pin->LinkedTo.Num() > 0)
+					{
+						// Check if it's a pose link (not just exec or data)
+						if (Pin->PinType.PinCategory == TEXT("struct") &&
+							Pin->PinType.PinSubCategoryObject.IsValid() &&
+							Pin->PinType.PinSubCategoryObject->GetName().Contains(TEXT("PoseLink")))
+						{
+							bHasOutputConnection = true;
+							break;
+						}
+					}
+				}
+
+				// If no output pose connection, it's disconnected
+				if (!bHasOutputConnection)
+				{
+					DisconnectedNodes.Add(Node);
+				}
+			}
+
+			// Remove disconnected nodes
+			for (UEdGraphNode* NodeToRemove : DisconnectedNodes)
+			{
+				Graph->RemoveNode(NodeToRemove);
+				DisconnectedNodesRemoved++;
+			}
+		}
+
+		// Recompile after removing disconnected nodes
+		if (DisconnectedNodesRemoved > 0)
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+			FCompilerResultsLog FinalLog;
+			FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &FinalLog);
+			PostCompileLog = FinalLog;
+		}
+	}
+
+	bool bSuccess = (Blueprint->Status == BS_UpToDate || Blueprint->Status == BS_UpToDateWithWarnings);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Error nodes removed successfully"));
+	Data->SetNumberField(TEXT("nodes_removed"), NodesRemoved);
+	Data->SetNumberField(TEXT("connections_rewired"), ConnectionsRewired);
+	Data->SetNumberField(TEXT("disconnected_nodes_removed"), DisconnectedNodesRemoved);
+	Data->SetBoolField(TEXT("compiled_successfully"), bSuccess);
+
+	// Get remaining error count
+	int32 RemainingErrors = 0;
+	for (const TSharedRef<FTokenizedMessage>& Message : PostCompileLog.Messages)
+	{
+		if (Message->GetSeverity() == EMessageSeverity::Error)
+		{
+			RemainingErrors++;
+		}
+	}
+	Data->SetNumberField(TEXT("remaining_errors"), RemainingErrors);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleClearAnimationBlueprintTags(const TSharedPtr<FJsonObject>& Params)
+{
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	UAnimBlueprint* AnimBP = Cast<UAnimBlueprint>(Blueprint);
+	if (!AnimBP)
+	{
+		return MakeError(TEXT("Blueprint is not an Animation Blueprint"));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShareable(new FJsonObject);
+	int32 RemovedCount = 0;
+
+	// Find and remove AnimBlueprintExtension_Tag objects from the extensions array
+	TArray<UBlueprintExtension*> ExtensionsToRemove;
+
+	for (UBlueprintExtension* Extension : AnimBP->GetExtensions())
+	{
+		if (Extension && Extension->GetClass()->GetName().Contains(TEXT("AnimBlueprintExtension_Tag")))
+		{
+			ExtensionsToRemove.Add(Extension);
+		}
+	}
+
+	// Remove the extensions
+	for (UBlueprintExtension* Extension : ExtensionsToRemove)
+	{
+		AnimBP->RemoveExtension(Extension);
+		RemovedCount++;
+	}
+
+	if (RemovedCount > 0)
+	{
+		AnimBP->MarkPackageDirty();
+		Data->SetStringField(TEXT("message"), TEXT("Extensions removed. Blueprint marked dirty. Compile manually in the editor."));
+	}
+	else
+	{
+		Data->SetStringField(TEXT("message"), TEXT("No AnimBlueprintExtension_Tag objects found."));
+	}
+
+	Data->SetNumberField(TEXT("removed_count"), RemovedCount);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleClearAnimGraph(const TSharedPtr<FJsonObject>& Params)
+{
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	UAnimBlueprint* AnimBP = Cast<UAnimBlueprint>(Blueprint);
+	if (!AnimBP)
+	{
+		return MakeError(TEXT("Blueprint is not an Animation Blueprint"));
+	}
+
+	// Find the AnimGraph - check both FunctionGraphs and UbergraphPages
+	UEdGraph* AnimGraph = nullptr;
+
+	// First check FunctionGraphs (where AnimGraph is typically stored)
+	for (UEdGraph* Graph : AnimBP->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName() == TEXT("AnimGraph"))
+		{
+			AnimGraph = Graph;
+			break;
+		}
+	}
+
+	// If not found, check UbergraphPages
+	if (!AnimGraph)
+	{
+		for (UEdGraph* Graph : AnimBP->UbergraphPages)
+		{
+			if (Graph && Graph->GetName() == TEXT("AnimGraph"))
+			{
+				AnimGraph = Graph;
+				break;
+			}
+		}
+	}
+
+	if (!AnimGraph)
+	{
+		return MakeError(TEXT("AnimGraph not found in animation blueprint"));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShareable(new FJsonObject);
+	int32 DeletedCount = 0;
+
+	// Collect all nodes except the root output node
+	TArray<UEdGraphNode*> NodesToDelete;
+	for (UEdGraphNode* Node : AnimGraph->Nodes)
+	{
+		if (Node && !Node->GetClass()->GetName().Contains(TEXT("AnimGraphNode_Root")))
+		{
+			NodesToDelete.Add(Node);
+		}
+	}
+
+	// Delete the nodes
+	for (UEdGraphNode* Node : NodesToDelete)
+	{
+		AnimGraph->RemoveNode(Node);
+		DeletedCount++;
+	}
+
+	// Also clear all nested/sub-graphs (state machines, transitions, etc.)
+	// This prevents crashes from orphaned nodes in nested graphs
+	TArray<UEdGraph*> AllGraphs;
+	AllGraphs.Append(AnimBP->FunctionGraphs);
+	AllGraphs.Append(AnimBP->UbergraphPages);
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (Graph && Graph != AnimGraph)
+		{
+			// Clear all nodes from this sub-graph
+			TArray<UEdGraphNode*> SubGraphNodesToDelete;
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (Node)
+				{
+					SubGraphNodesToDelete.Add(Node);
+				}
+			}
+
+			for (UEdGraphNode* Node : SubGraphNodesToDelete)
+			{
+				Graph->RemoveNode(Node);
+				DeletedCount++;
+			}
+		}
+	}
+
+	if (DeletedCount > 0)
+	{
+		AnimBP->MarkPackageDirty();
+		Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Deleted %d nodes from AnimGraph and all nested graphs (state machines, transitions, etc.). Blueprint marked dirty. Compile manually in the editor."), DeletedCount));
+	}
+	else
+	{
+		Data->SetStringField(TEXT("message"), TEXT("No nodes to delete (only root output node found)."));
+	}
+
+	Data->SetNumberField(TEXT("deleted_count"), DeletedCount);
+
+	return MakeResponse(true, Data);
+}
+
+// ==================================================
+// Sprint 1: Blueprint Function Creation Commands
+// ==================================================
+
+FString FMCPServer::HandleCreateBlueprintFunction(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) || !Params->HasField(TEXT("function_name")))
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' or 'function_name' parameter"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	const FString FunctionName = Params->GetStringField(TEXT("function_name"));
+
+	// Optional parameters
+	const bool bIsPure = Params->HasField(TEXT("is_pure")) ? Params->GetBoolField(TEXT("is_pure")) : false;
+	const bool bIsThreadSafe = Params->HasField(TEXT("is_thread_safe")) ? Params->GetBoolField(TEXT("is_thread_safe")) : false;
+	const bool bIsConst = Params->HasField(TEXT("is_const")) ? Params->GetBoolField(TEXT("is_const")) : false;
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// Check if function already exists
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName() == FunctionName)
+		{
+			return MakeError(FString::Printf(TEXT("Function '%s' already exists in blueprint"), *FunctionName));
+		}
+	}
+
+	// Create new function graph using the blueprint editor utilities
+	UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(
+		Blueprint,
+		FName(*FunctionName),
+		UEdGraph::StaticClass(),
+		UEdGraphSchema_K2::StaticClass()
+	);
+
+	if (!NewGraph)
+	{
+		return MakeError(TEXT("Failed to create function graph"));
+	}
+
+	// Initialize the graph schema
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	K2Schema->CreateDefaultNodesForGraph(*NewGraph);
+
+	// Add to blueprint's function graphs array
+	Blueprint->FunctionGraphs.Add(NewGraph);
+
+	// Find the function entry node to set metadata
+	UK2Node_FunctionEntry* EntryNode = nullptr;
+	for (UEdGraphNode* Node : NewGraph->Nodes)
+	{
+		EntryNode = Cast<UK2Node_FunctionEntry>(Node);
+		if (EntryNode)
+		{
+			break;
+		}
+	}
+
+	if (EntryNode)
+	{
+		// Set function flags
+		if (bIsPure)
+		{
+			EntryNode->AddExtraFlags(FUNC_BlueprintPure);
+		}
+		if (bIsThreadSafe)
+		{
+			EntryNode->MetaData.bThreadSafe = true;
+		}
+		if (bIsConst)
+		{
+			EntryNode->AddExtraFlags(FUNC_Const);
+		}
+	}
+
+	// Mark blueprint as structurally modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Function created successfully"));
+	Data->SetStringField(TEXT("function_name"), FunctionName);
+	Data->SetBoolField(TEXT("is_pure"), bIsPure);
+	Data->SetBoolField(TEXT("is_thread_safe"), bIsThreadSafe);
+	Data->SetBoolField(TEXT("is_const"), bIsConst);
+	Data->SetNumberField(TEXT("total_functions"), Blueprint->FunctionGraphs.Num());
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleAddFunctionInput(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) ||
+		!Params->HasField(TEXT("function_name")) || !Params->HasField(TEXT("parameter_name")) ||
+		!Params->HasField(TEXT("parameter_type")))
+	{
+		return MakeError(TEXT("Missing required parameters: 'blueprint_path', 'function_name', 'parameter_name', 'parameter_type'"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	const FString FunctionName = Params->GetStringField(TEXT("function_name"));
+	const FString ParameterName = Params->GetStringField(TEXT("parameter_name"));
+	const FString ParameterType = Params->GetStringField(TEXT("parameter_type"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// Find the function graph
+	UEdGraph* FunctionGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName() == FunctionName)
+		{
+			FunctionGraph = Graph;
+			break;
+		}
+	}
+
+	if (!FunctionGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Function '%s' not found in blueprint"), *FunctionName));
+	}
+
+	// Find the function entry node
+	UK2Node_FunctionEntry* EntryNode = nullptr;
+	for (UEdGraphNode* Node : FunctionGraph->Nodes)
+	{
+		EntryNode = Cast<UK2Node_FunctionEntry>(Node);
+		if (EntryNode)
+		{
+			break;
+		}
+	}
+
+	if (!EntryNode)
+	{
+		return MakeError(TEXT("Function entry node not found"));
+	}
+
+	// Parse parameter type and create pin
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	FEdGraphPinType PinType;
+
+	// Simple type parsing (can be expanded)
+	if (ParameterType == TEXT("int") || ParameterType == TEXT("int32"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Int;
+	}
+	else if (ParameterType == TEXT("float") || ParameterType == TEXT("double"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
+		PinType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+	}
+	else if (ParameterType == TEXT("bool") || ParameterType == TEXT("boolean"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+	}
+	else if (ParameterType == TEXT("string") || ParameterType == TEXT("FString"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_String;
+	}
+	else if (ParameterType == TEXT("FVector"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
+	}
+	else if (ParameterType == TEXT("FRotator"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
+	}
+	else if (ParameterType == TEXT("FTransform"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FTransform>::Get();
+	}
+	else
+	{
+		// Try to load as object type or struct
+		UObject* TypeObject = FindObject<UObject>(nullptr, *ParameterType);
+		if (!TypeObject)
+		{
+			TypeObject = LoadObject<UObject>(nullptr, *ParameterType);
+		}
+
+		if (UClass* Class = Cast<UClass>(TypeObject))
+		{
+			PinType.PinCategory = UEdGraphSchema_K2::PC_Object;
+			PinType.PinSubCategoryObject = Class;
+		}
+		else if (UScriptStruct* Struct = Cast<UScriptStruct>(TypeObject))
+		{
+			PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+			PinType.PinSubCategoryObject = Struct;
+		}
+		else
+		{
+			return MakeError(FString::Printf(TEXT("Unknown parameter type: %s"), *ParameterType));
+		}
+	}
+
+	// Create the new user-defined pin
+	EntryNode->CreateUserDefinedPin(FName(*ParameterName), PinType, EGPD_Output);
+
+	// Mark blueprint as structurally modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Function input parameter added successfully"));
+	Data->SetStringField(TEXT("function_name"), FunctionName);
+	Data->SetStringField(TEXT("parameter_name"), ParameterName);
+	Data->SetStringField(TEXT("parameter_type"), ParameterType);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleAddFunctionOutput(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) ||
+		!Params->HasField(TEXT("function_name")) || !Params->HasField(TEXT("parameter_name")) ||
+		!Params->HasField(TEXT("parameter_type")))
+	{
+		return MakeError(TEXT("Missing required parameters: 'blueprint_path', 'function_name', 'parameter_name', 'parameter_type'"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	const FString FunctionName = Params->GetStringField(TEXT("function_name"));
+	const FString ParameterName = Params->GetStringField(TEXT("parameter_name"));
+	const FString ParameterType = Params->GetStringField(TEXT("parameter_type"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// Find the function graph
+	UEdGraph* FunctionGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName() == FunctionName)
+		{
+			FunctionGraph = Graph;
+			break;
+		}
+	}
+
+	if (!FunctionGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Function '%s' not found in blueprint"), *FunctionName));
+	}
+
+	// Find the function result node
+	UK2Node_FunctionResult* ResultNode = nullptr;
+	for (UEdGraphNode* Node : FunctionGraph->Nodes)
+	{
+		ResultNode = Cast<UK2Node_FunctionResult>(Node);
+		if (ResultNode)
+		{
+			break;
+		}
+	}
+
+	// If no result node exists, create one
+	if (!ResultNode)
+	{
+		ResultNode = NewObject<UK2Node_FunctionResult>(FunctionGraph);
+		ResultNode->CreateNewGuid();
+		ResultNode->PostPlacedNewNode();
+		ResultNode->AllocateDefaultPins();
+		FunctionGraph->AddNode(ResultNode);
+	}
+
+	// Parse parameter type and create pin (same logic as input)
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	FEdGraphPinType PinType;
+
+	if (ParameterType == TEXT("int") || ParameterType == TEXT("int32"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Int;
+	}
+	else if (ParameterType == TEXT("float") || ParameterType == TEXT("double"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
+		PinType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+	}
+	else if (ParameterType == TEXT("bool") || ParameterType == TEXT("boolean"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+	}
+	else if (ParameterType == TEXT("string") || ParameterType == TEXT("FString"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_String;
+	}
+	else if (ParameterType == TEXT("FVector"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
+	}
+	else if (ParameterType == TEXT("FRotator"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
+	}
+	else if (ParameterType == TEXT("FTransform"))
+	{
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		PinType.PinSubCategoryObject = TBaseStructure<FTransform>::Get();
+	}
+	else
+	{
+		UObject* TypeObject = FindObject<UObject>(nullptr, *ParameterType);
+		if (!TypeObject)
+		{
+			TypeObject = LoadObject<UObject>(nullptr, *ParameterType);
+		}
+
+		if (UClass* Class = Cast<UClass>(TypeObject))
+		{
+			PinType.PinCategory = UEdGraphSchema_K2::PC_Object;
+			PinType.PinSubCategoryObject = Class;
+		}
+		else if (UScriptStruct* Struct = Cast<UScriptStruct>(TypeObject))
+		{
+			PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+			PinType.PinSubCategoryObject = Struct;
+		}
+		else
+		{
+			return MakeError(FString::Printf(TEXT("Unknown parameter type: %s"), *ParameterType));
+		}
+	}
+
+	// Create the new user-defined pin for output
+	ResultNode->CreateUserDefinedPin(FName(*ParameterName), PinType, EGPD_Input);
+
+	// Mark blueprint as structurally modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Function output parameter added successfully"));
+	Data->SetStringField(TEXT("function_name"), FunctionName);
+	Data->SetStringField(TEXT("parameter_name"), ParameterName);
+	Data->SetStringField(TEXT("parameter_type"), ParameterType);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleRenameBlueprintFunction(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) ||
+		!Params->HasField(TEXT("old_function_name")) || !Params->HasField(TEXT("new_function_name")))
+	{
+		return MakeError(TEXT("Missing required parameters: 'blueprint_path', 'old_function_name', 'new_function_name'"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	const FString OldFunctionName = Params->GetStringField(TEXT("old_function_name"));
+	const FString NewFunctionName = Params->GetStringField(TEXT("new_function_name"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// Find the function graph to rename
+	UEdGraph* FunctionGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName() == OldFunctionName)
+		{
+			FunctionGraph = Graph;
+			break;
+		}
+	}
+
+	if (!FunctionGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Function '%s' not found in blueprint"), *OldFunctionName));
+	}
+
+	// Check if new name already exists
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph != FunctionGraph && Graph->GetName() == NewFunctionName)
+		{
+			return MakeError(FString::Printf(TEXT("Function '%s' already exists in blueprint"), *NewFunctionName));
+		}
+	}
+
+	// Rename the graph
+	FBlueprintEditorUtils::RenameGraph(FunctionGraph, NewFunctionName);
+
+	// Mark blueprint as structurally modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Function renamed successfully"));
+	Data->SetStringField(TEXT("old_name"), OldFunctionName);
+	Data->SetStringField(TEXT("new_name"), NewFunctionName);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleReadActorProperties(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("actor_name")))
+	{
+		return MakeError(TEXT("Missing required parameter: 'actor_name'"));
+	}
+
+	const FString ActorName = Params->GetStringField(TEXT("actor_name"));
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		return MakeError(TEXT("No world available"));
+	}
+
+	// Find the actor by name
+	AActor* FoundActor = nullptr;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (Actor && Actor->GetName() == ActorName)
+		{
+			FoundActor = Actor;
+			break;
+		}
+	}
+
+	if (!FoundActor)
+	{
+		return MakeError(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+	}
+
+	// Serialize actor properties to JSON
+	TSharedPtr<FJsonObject> PropertiesObj = MakeShared<FJsonObject>();
+	UClass* ActorClass = FoundActor->GetClass();
+
+	for (TFieldIterator<FProperty> PropIt(ActorClass); PropIt; ++PropIt)
+	{
+		FProperty* Property = *PropIt;
+
+		// Only export EditAnywhere properties to preserve instance data
+		if (!Property->HasAnyPropertyFlags(CPF_Edit))
+		{
+			continue;
+		}
+
+		FString PropertyName = Property->GetName();
+		FString PropertyValue;
+		Property->ExportTextItem_Direct(PropertyValue, Property->ContainerPtrToValuePtr<void>(FoundActor), nullptr, FoundActor, PPF_None);
+
+		PropertiesObj->SetStringField(PropertyName, PropertyValue);
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("actor_name"), ActorName);
+	Data->SetStringField(TEXT("actor_class"), ActorClass->GetName());
+	Data->SetStringField(TEXT("actor_label"), FoundActor->GetActorLabel());
+	Data->SetObjectField(TEXT("properties"), PropertiesObj);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleSetActorProperties(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("actor_name")) || !Params->HasField(TEXT("properties")))
+	{
+		return MakeError(TEXT("Missing required parameters: 'actor_name', 'properties'"));
+	}
+
+	const FString ActorName = Params->GetStringField(TEXT("actor_name"));
+	const TSharedPtr<FJsonObject> PropertiesObj = Params->GetObjectField(TEXT("properties"));
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		return MakeError(TEXT("No world available"));
+	}
+
+	// Find the actor by name
+	AActor* FoundActor = nullptr;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (Actor && Actor->GetName() == ActorName)
+		{
+			FoundActor = Actor;
+			break;
+		}
+	}
+
+	if (!FoundActor)
+	{
+		return MakeError(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+	}
+
+	// Mark the actor as modified
+	FoundActor->Modify();
+
+	// Deserialize properties from JSON back to actor
+	UClass* ActorClass = FoundActor->GetClass();
+	int32 PropertiesSet = 0;
+
+	for (auto& Pair : PropertiesObj->Values)
+	{
+		FString PropertyName = Pair.Key;
+		FString PropertyValue = Pair.Value->AsString();
+
+		FProperty* Property = ActorClass->FindPropertyByName(FName(*PropertyName));
+		if (!Property)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Property not found: %s"), *PropertyName);
+			continue;
+		}
+
+		// Only set EditAnywhere properties
+		if (!Property->HasAnyPropertyFlags(CPF_Edit))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Property not editable: %s"), *PropertyName);
+			continue;
+		}
+
+		// Import the property value
+		Property->ImportText_Direct(*PropertyValue, Property->ContainerPtrToValuePtr<void>(FoundActor), FoundActor, PPF_None);
+		PropertiesSet++;
+	}
+
+	// Mark the actor for saving
+	FoundActor->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Actor properties set successfully"));
+	Data->SetStringField(TEXT("actor_name"), ActorName);
+	Data->SetNumberField(TEXT("properties_set"), PropertiesSet);
+
+	return MakeResponse(true, Data);
 }

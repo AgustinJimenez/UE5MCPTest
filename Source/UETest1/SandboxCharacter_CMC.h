@@ -104,6 +104,27 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_Look_Gamepad;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Sprint;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Walk;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Jump;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Crouch;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Strafe;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Aim;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputMappingContext> IMC_Sandbox;
+
 	// ===== INTERFACE IMPLEMENTATION =====
 
 	virtual FS_CharacterPropertiesForAnimation Get_PropertiesForAnimation_Implementation() override;
@@ -154,6 +175,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+	virtual void Landed(const FHitResult& Hit) override;
 
 	// ===== INPUT HANDLERS =====
 
@@ -161,9 +183,19 @@ protected:
 	void OnMoveWorldSpace(const struct FInputActionValue& Value);
 	void OnLook(const struct FInputActionValue& Value);
 	void OnLookGamepad(const struct FInputActionValue& Value);
+	void OnSprint(const struct FInputActionValue& Value);
+	void OnWalk(const struct FInputActionValue& Value);
+	void OnJumpAction(const struct FInputActionValue& Value);
+	void OnJumpReleased(const struct FInputActionValue& Value);
+	void OnCrouchAction(const struct FInputActionValue& Value);
+	void OnStrafe(const struct FInputActionValue& Value);
+	void OnAim(const struct FInputActionValue& Value);
 
 	// Helper function to get movement input scale
 	FVector2D GetMovementInputScaleValue(const FVector2D& Input) const;
+
+	// Helper to reset JustLanded flag after delay
+	void ResetJustLanded();
 
 	// ===== CACHED COMPONENTS =====
 
@@ -197,4 +229,8 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UActorComponent> CachedSmartObjectAnimation;
+
+private:
+	// Timer handle for JustLanded flag reset
+	FTimerHandle JustLandedTimerHandle;
 };

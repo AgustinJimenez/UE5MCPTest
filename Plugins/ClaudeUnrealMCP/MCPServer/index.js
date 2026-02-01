@@ -138,6 +138,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "read_class_defaults",
+        description: "Read class default object (CDO) properties from a blueprint, including inherited properties like Default Pawn Class from GameMode",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
         name: "read_components",
         description: "Read all components in a blueprint's component hierarchy",
         inputSchema: {
@@ -596,6 +610,189 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Optional filename (without extension). Defaults to 'MCP_Screenshot'. A timestamp will be appended automatically.",
             },
           },
+        },
+      },
+      {
+        name: "remove_error_nodes",
+        description: "Automatically identify and remove nodes causing compilation errors in a blueprint. Useful for cleaning up after C++ conversions.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            auto_rewire: {
+              type: "boolean",
+              description: "Attempt to reconnect execution flow around deleted nodes (default: true)",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      {
+        name: "clear_animation_blueprint_tags",
+        description: "Remove AnimBlueprintExtension_Tag objects from an animation blueprint to fix 'cannot find referenced node with tag' errors. Use when tagged nodes have been removed but extensions still reference them.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the animation blueprint asset",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      {
+        name: "clear_anim_graph",
+        description: "Delete all nodes from an animation blueprint's AnimGraph, leaving only the root output node. Use when rebuilding an AnimGraph from scratch or clearing corrupted graph state.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the animation blueprint asset",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      // Sprint 1: Blueprint Function Creation Commands
+      {
+        name: "create_blueprint_function",
+        description: "Create a new function in a blueprint with optional metadata flags (BlueprintThreadSafe, BlueprintPure, Const)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            function_name: {
+              type: "string",
+              description: "Name of the new function to create",
+            },
+            is_pure: {
+              type: "boolean",
+              description: "Whether the function is pure (no execution pins, returns value only). Default: false",
+            },
+            is_thread_safe: {
+              type: "boolean",
+              description: "Whether the function is thread-safe (can be called from animation worker threads). Default: false",
+            },
+            is_const: {
+              type: "boolean",
+              description: "Whether the function is const (doesn't modify object state). Default: false",
+            },
+          },
+          required: ["blueprint_path", "function_name"],
+        },
+      },
+      {
+        name: "add_function_input",
+        description: "Add an input parameter to an existing blueprint function",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            function_name: {
+              type: "string",
+              description: "Name of the function to modify",
+            },
+            parameter_name: {
+              type: "string",
+              description: "Name of the input parameter to add",
+            },
+            parameter_type: {
+              type: "string",
+              description: "Type of the parameter (e.g., int, float, bool, string, FVector, FRotator, FTransform, or full path to object/struct type)",
+            },
+          },
+          required: ["blueprint_path", "function_name", "parameter_name", "parameter_type"],
+        },
+      },
+      {
+        name: "add_function_output",
+        description: "Add an output parameter (return value) to an existing blueprint function",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            function_name: {
+              type: "string",
+              description: "Name of the function to modify",
+            },
+            parameter_name: {
+              type: "string",
+              description: "Name of the output parameter to add",
+            },
+            parameter_type: {
+              type: "string",
+              description: "Type of the parameter (e.g., int, float, bool, string, FVector, FRotator, FTransform, or full path to object/struct type)",
+            },
+          },
+          required: ["blueprint_path", "function_name", "parameter_name", "parameter_type"],
+        },
+      },
+      {
+        name: "rename_blueprint_function",
+        description: "Rename an existing blueprint function",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            old_function_name: {
+              type: "string",
+              description: "Current name of the function",
+            },
+            new_function_name: {
+              type: "string",
+              description: "New name for the function",
+            },
+          },
+          required: ["blueprint_path", "old_function_name", "new_function_name"],
+        },
+      },
+      {
+        name: "read_actor_properties",
+        description: "Read all EditAnywhere properties from a level actor instance. Use this to preserve actor configuration before blueprint reparenting.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            actor_name: {
+              type: "string",
+              description: "Name of the actor in the level (e.g., LevelVisuals_2, LevelBlock_3)",
+            },
+          },
+          required: ["actor_name"],
+        },
+      },
+      {
+        name: "set_actor_properties",
+        description: "Set EditAnywhere properties on a level actor instance. Use this to restore actor configuration after blueprint reparenting.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            actor_name: {
+              type: "string",
+              description: "Name of the actor in the level (e.g., LevelVisuals_2, LevelBlock_3)",
+            },
+            properties: {
+              type: "object",
+              description: "Object containing property name-value pairs (as returned by read_actor_properties)",
+            },
+          },
+          required: ["actor_name", "properties"],
         },
       },
     ],

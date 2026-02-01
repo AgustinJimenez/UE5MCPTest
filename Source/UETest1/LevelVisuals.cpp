@@ -8,62 +8,6 @@ ALevelVisuals::ALevelVisuals()
 	PrimaryActorTick.bCanEverTick = false;
 
 	StyleIndex = 0;
-
-	// Add a default style if none exist
-	if (LevelStyles.Num() == 0)
-	{
-		FS_LevelStyle DefaultStyle;
-		DefaultStyle.FogColor = FLinearColor(0.5f, 0.7f, 1.0f); // Light blue fog
-		DefaultStyle.FogDensity = 0.02;
-		DefaultStyle.DecalColor = FLinearColor::White;
-
-		// Add default block colors
-		FS_GridMaterialParams WhiteParams;
-		WhiteParams.GridColor = FLinearColor(0.2f, 0.2f, 0.2f);
-		WhiteParams.SurfaceColor = FLinearColor::White;
-		WhiteParams.GridSizes = FVector(100.0, 100.0, 10.0);
-		WhiteParams.Specularity = 0.5;
-
-		FS_GridMaterialParams BlueParams;
-		BlueParams.GridColor = FLinearColor(0.1f, 0.1f, 0.3f);
-		BlueParams.SurfaceColor = FLinearColor(0.0f, 0.5f, 1.0f);
-		BlueParams.GridSizes = FVector(100.0, 100.0, 10.0);
-		BlueParams.Specularity = 0.5;
-
-		FS_GridMaterialParams GreenParams;
-		GreenParams.GridColor = FLinearColor(0.1f, 0.3f, 0.1f);
-		GreenParams.SurfaceColor = FLinearColor(0.0f, 1.0f, 0.0f);
-		GreenParams.GridSizes = FVector(100.0, 100.0, 10.0);
-		GreenParams.Specularity = 0.5;
-
-		FS_GridMaterialParams OrangeParams;
-		OrangeParams.GridColor = FLinearColor(0.3f, 0.15f, 0.05f);
-		OrangeParams.SurfaceColor = FLinearColor(1.0f, 0.5f, 0.0f);
-		OrangeParams.GridSizes = FVector(100.0, 100.0, 10.0);
-		OrangeParams.Specularity = 0.5;
-
-		FS_GridMaterialParams RedParams;
-		RedParams.GridColor = FLinearColor(0.3f, 0.1f, 0.1f);
-		RedParams.SurfaceColor = FLinearColor(1.0f, 0.0f, 0.0f);
-		RedParams.GridSizes = FVector(100.0, 100.0, 10.0);
-		RedParams.Specularity = 0.5;
-
-		FS_GridMaterialParams YellowParams;
-		YellowParams.GridColor = FLinearColor(0.3f, 0.3f, 0.05f);
-		YellowParams.SurfaceColor = FLinearColor(1.0f, 1.0f, 0.0f);
-		YellowParams.GridSizes = FVector(100.0, 100.0, 10.0);
-		YellowParams.Specularity = 0.5;
-
-		DefaultStyle.BlockColors.Add(TEXT("None"), WhiteParams);
-		DefaultStyle.BlockColors.Add(TEXT("White"), WhiteParams);
-		DefaultStyle.BlockColors.Add(TEXT("Blue"), BlueParams);
-		DefaultStyle.BlockColors.Add(TEXT("Green"), GreenParams);
-		DefaultStyle.BlockColors.Add(TEXT("Orange"), OrangeParams);
-		DefaultStyle.BlockColors.Add(TEXT("Red"), RedParams);
-		DefaultStyle.BlockColors.Add(TEXT("Yellow"), YellowParams);
-
-		LevelStyles.Add(DefaultStyle);
-	}
 }
 
 void ALevelVisuals::BeginPlay()
@@ -84,6 +28,43 @@ void ALevelVisuals::BeginPlay()
 void ALevelVisuals::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+
+	// Initialize LevelStyles if empty or invalid
+	if (LevelStyles.Num() == 0 || !LevelStyles[0].BlockColors.Contains(TEXT("Floor")))
+	{
+		LevelStyles.Empty();
+
+		// Style 2 (Purple fog, orange decal) - matches original default
+		FS_LevelStyle Style2;
+		Style2.FogColor = FLinearColor(0.539931f, 0.447917f, 1.0f);
+		Style2.FogDensity = 0.02;
+		Style2.DecalColor = FLinearColor(1.0f, 0.5f, 0.0f, 0.4f);
+
+		FS_GridMaterialParams FloorParams;
+		FloorParams.GridColor = FLinearColor(0.5f, 0.5f, 0.5f);
+		FloorParams.SurfaceColor = FLinearColor(0.258463f, 0.236978f, 0.541667f);
+		FloorParams.GridSizes = FVector(100.0, 200.0, 800.0);
+		FloorParams.Specularity = 0.5;
+
+		FS_GridMaterialParams BlocksParams;
+		BlocksParams.GridColor = FLinearColor(0.177083f, 0.177083f, 0.177083f);
+		BlocksParams.SurfaceColor = FLinearColor(0.510417f, 0.510417f, 0.510417f);
+		BlocksParams.GridSizes = FVector(100.0, 100.0, 10.0);
+		BlocksParams.Specularity = 0.5;
+
+		FS_GridMaterialParams TraversableParams;
+		TraversableParams.GridColor = FLinearColor(0.7f, 0.7f, 0.7f);
+		TraversableParams.SurfaceColor = FLinearColor(0.850000f, 0.264066f, 0.132812f);
+		TraversableParams.GridSizes = FVector(100.0, 100.0, 10.0);
+		TraversableParams.Specularity = 0.5;
+
+		Style2.BlockColors.Add(TEXT("Floor"), FloorParams);
+		Style2.BlockColors.Add(TEXT("Blocks"), BlocksParams);
+		Style2.BlockColors.Add(TEXT("Blocks_Traversable"), TraversableParams);
+		Style2.BlockColors.Add(TEXT("Orange"), BlocksParams);  // Fallback
+
+		LevelStyles.Add(Style2);
+	}
 
 	// Cache blueprint components by class during construction
 	CachedScene = GetRootComponent();

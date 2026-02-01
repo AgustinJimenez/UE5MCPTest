@@ -74,11 +74,24 @@ void ASandboxCharacter_CMC::BeginPlay()
 			CachedSmartObjectAnimation = Component;
 		}
 	}
+
 }
 
 void ASandboxCharacter_CMC::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+	// Setup Enhanced Input mapping context
+	if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
+		{
+			if (IMC_Sandbox)
+			{
+				Subsystem->AddMappingContext(IMC_Sandbox, 0);
+			}
+		}
+	}
 
 	// Bind Enhanced Input actions
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
@@ -101,6 +114,37 @@ void ASandboxCharacter_CMC::SetupPlayerInputComponent(UInputComponent* PlayerInp
 		if (IA_Look_Gamepad)
 		{
 			EnhancedInputComponent->BindAction(IA_Look_Gamepad, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnLookGamepad);
+		}
+
+		if (IA_Sprint)
+		{
+			EnhancedInputComponent->BindAction(IA_Sprint, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnSprint);
+		}
+
+		if (IA_Walk)
+		{
+			EnhancedInputComponent->BindAction(IA_Walk, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnWalk);
+		}
+
+		if (IA_Jump)
+		{
+			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Started, this, &ASandboxCharacter_CMC::OnJumpAction);
+			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Completed, this, &ASandboxCharacter_CMC::OnJumpReleased);
+		}
+
+		if (IA_Crouch)
+		{
+			EnhancedInputComponent->BindAction(IA_Crouch, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnCrouchAction);
+		}
+
+		if (IA_Strafe)
+		{
+			EnhancedInputComponent->BindAction(IA_Strafe, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnStrafe);
+		}
+
+		if (IA_Aim)
+		{
+			EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnAim);
 		}
 	}
 }
@@ -428,4 +472,75 @@ void ASandboxCharacter_CMC::OnLookGamepad(const FInputActionValue& Value)
 	// Add yaw and pitch input (same as OnLook for now)
 	AddControllerYawInput(LookAxisVector.X);
 	AddControllerPitchInput(LookAxisVector.Y);
+}
+
+void ASandboxCharacter_CMC::OnSprint(const FInputActionValue& Value)
+{
+	// Set sprint flag in input state
+	CharacterInputState.WantsToSprint = Value.Get<bool>();
+}
+
+void ASandboxCharacter_CMC::OnWalk(const FInputActionValue& Value)
+{
+	// Toggle walk state
+	CharacterInputState.WantsToWalk = !CharacterInputState.WantsToWalk;
+}
+
+void ASandboxCharacter_CMC::OnJumpAction(const FInputActionValue& Value)
+{
+	// Call base character Jump()
+	Jump();
+}
+
+void ASandboxCharacter_CMC::OnJumpReleased(const FInputActionValue& Value)
+{
+	// Call base character StopJumping()
+	StopJumping();
+}
+
+void ASandboxCharacter_CMC::OnCrouchAction(const FInputActionValue& Value)
+{
+	// Toggle crouch state
+	if (bIsCrouched)
+	{
+		UnCrouch();
+	}
+	else
+	{
+		Crouch();
+	}
+}
+
+void ASandboxCharacter_CMC::OnStrafe(const FInputActionValue& Value)
+{
+	// Toggle strafe state
+	CharacterInputState.WantsToStrafe = !CharacterInputState.WantsToStrafe;
+}
+
+void ASandboxCharacter_CMC::OnAim(const FInputActionValue& Value)
+{
+	// Set aim flag in input state
+	CharacterInputState.WantsToAim = Value.Get<bool>();
+}
+
+// ===== PHYSICS EVENTS =====
+
+void ASandboxCharacter_CMC::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+
+	// Set JustLanded flag and capture landing velocity
+	JustLanded = true;
+	LandVelocity = GetCharacterMovement()->Velocity;
+
+	// Clear any existing timer
+	GetWorldTimerManager().ClearTimer(JustLandedTimerHandle);
+
+	// Set timer to reset JustLanded after 0.3 seconds
+	GetWorldTimerManager().SetTimer(JustLandedTimerHandle, this, &ASandboxCharacter_CMC::ResetJustLanded, 0.3f, false);
+}
+
+void ASandboxCharacter_CMC::ResetJustLanded()
+{
+	JustLanded = false;
 }

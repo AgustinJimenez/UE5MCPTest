@@ -24,6 +24,7 @@ private:
 	FString HandleListBlueprints(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadBlueprint(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadVariables(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadClassDefaults(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadComponents(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadEventGraph(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadEventGraphDetailed(const TSharedPtr<FJsonObject>& Params);
@@ -52,6 +53,19 @@ private:
 	FString HandleSetBlueprintCompileSettings(const TSharedPtr<FJsonObject>& Params);
 	FString HandleModifyFunctionMetadata(const TSharedPtr<FJsonObject>& Params);
 	FString HandleCaptureScreenshot(const TSharedPtr<FJsonObject>& Params);
+	FString HandleRemoveErrorNodes(const TSharedPtr<FJsonObject>& Params);
+	FString HandleClearAnimationBlueprintTags(const TSharedPtr<FJsonObject>& Params);
+	FString HandleClearAnimGraph(const TSharedPtr<FJsonObject>& Params);
+
+	// Blueprint function creation commands (Sprint 1)
+	FString HandleCreateBlueprintFunction(const TSharedPtr<FJsonObject>& Params);
+	FString HandleAddFunctionInput(const TSharedPtr<FJsonObject>& Params);
+	FString HandleAddFunctionOutput(const TSharedPtr<FJsonObject>& Params);
+	FString HandleRenameBlueprintFunction(const TSharedPtr<FJsonObject>& Params);
+
+	// Level actor property commands (Sprint 2)
+	FString HandleReadActorProperties(const TSharedPtr<FJsonObject>& Params);
+	FString HandleSetActorProperties(const TSharedPtr<FJsonObject>& Params);
 
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));

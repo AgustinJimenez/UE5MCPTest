@@ -2,8 +2,151 @@
 
 Goal: convert Blueprints to C++ in order from easiest to hardest.
 
+---
+
+## ✅ SUCCESSFUL CONVERSION - LevelBlock & LevelVisuals (2026-02-01)
+
+**Blueprints Converted:**
+- **LevelBlock**: Grid material system (Actor → C++ ALevelBlock)
+- **LevelVisuals**: Level style/fog/lighting system (Actor → C++ ALevelVisuals)
+
+**Key Challenge:** After reparenting to C++, existing level instances lost their LevelStyles data because C++ constructor initialization only applies to NEW instances, not existing instances.
+
+**Solution - Manual LevelStyles Data Population:**
+
+When reparenting blueprints with complex EditAnywhere arrays/structs to C++, existing level instances retain empty/old data. The OnConstruction initialization in C++ doesn't always trigger or update persistent level instance data.
+
+**Working Solution:**
+1. Save all instance properties using `save_all_levelblock_properties.js`
+2. Reparent both blueprints to C++ classes
+3. Restore instance properties using `restore_all_levelblock_properties.js`
+4. Remove duplicate blueprint functions (UpdateMaterials, UpdateText, UpdateLevelVisuals)
+5. Remove error nodes from struct mismatches
+6. **Manually set LevelStyles data** on the LevelVisuals actor instance:
+
+```javascript
+// Manually populate LevelStyles with proper color data
+set_actor_properties({
+  actor_name: "LevelVisuals_C_6",
+  properties: {
+    "LevelStyles": "((FogColor=(R=0.539931,G=0.447917,B=1.0,A=1.0),FogDensity=0.02,DecalColor=(R=1.0,G=0.5,B=0.0,A=0.4),BlockColors=((\"Floor\",(GridColor=(R=0.5,G=0.5,B=0.5,A=1.0),SurfaceColor=(R=0.258463,G=0.236978,B=0.541667,A=1.0),GridSizes=(X=100.0,Y=200.0,Z=800.0),Specularity=0.5)),(\"Blocks\",(GridColor=(R=0.177083,G=0.177083,B=0.177083,A=1.0),SurfaceColor=(R=0.510417,G=0.510417,B=0.510417,A=1.0),GridSizes=(X=100.0,Y=100.0,Z=10.0),Specularity=0.5)),(\"Blocks_Traversable\",(GridColor=(R=0.7,G=0.7,B=0.7,A=1.0),SurfaceColor=(R=0.85,G=0.264066,B=0.132812,A=1.0),GridSizes=(X=100.0,Y=100.0,Z=10.0),Specularity=0.5)),(\"Orange\",(GridColor=(R=0.177083,G=0.177083,B=0.177083,A=1.0),SurfaceColor=(R=0.510417,G=0.510417,B=0.510417,A=1.0),GridSizes=(X=100.0,Y=100.0,Z=10.0),Specularity=0.5)))))"
+  }
+})
+```
+
+7. Trigger reconstruction on all LevelBlock instances: `node reconstruct_all_levelblocks.js`
+8. Save all assets
+
+**C++ Implementation Details:**
+
+**LevelVisuals.cpp OnConstruction (attempted but didn't work for existing instances):**
+```cpp
+void ALevelVisuals::OnConstruction(const FTransform& Transform)
+{
+    // This initialization works for NEW instances, but not existing level instances
+    if (LevelStyles.Num() == 0 || !LevelStyles[0].BlockColors.Contains(TEXT("Floor")))
+    {
+        LevelStyles.Empty();
+        FS_LevelStyle Style2;
+        Style2.FogColor = FLinearColor(0.539931f, 0.447917f, 1.0f);
+        Style2.FogDensity = 0.02;
+        // ... populate BlockColors ...
+        LevelStyles.Add(Style2);
+    }
+    // Cache components and call UpdateLevelVisuals()
+}
+```
+
+**Final Result:**
+- ✅ Both blueprints compile with 0 errors
+- ✅ All 33 LevelBlock instances preserved
+- ✅ Purple fog rendering correctly
+- ✅ Block colors: Floor=purple, Blocks=gray, Blocks_Traversable=orange/red
+- ✅ Lighting and visual system functional
+
+**Key Lesson:** When converting blueprints with complex EditAnywhere data to C++, always prepare to manually populate level instance data using MCP's `set_actor_properties` command with the full struct syntax. C++ OnConstruction initialization is unreliable for existing instances.
+
+---
+
 **IMPORTANT CONVERSION PRINCIPLE:**
 The goal is **full C++ conversion** of the entire project, not partial conversion. When encountering dependencies (e.g., blueprint struct S_LevelStyle containing another blueprint struct S_GridMaterialParams), the correct approach is always to convert **both** to C++ rather than attempting to work around limitations or asking "should we convert this?". We've encountered this pattern multiple times where partial conversion blocks progress. When facing these situations: **just convert everything to C++ without asking**. That is the entire point of this task.
+
+---
+
+## CONTENT FOLDER RESET - RECONVERSION NEEDED (2026-02-01)
+
+**Situation:** Content folder was restored from functional backup, resetting many blueprints back to blueprint-only state. However, C++ source files in `/Source/UETest1/` were NOT reset and still exist.
+
+**Task:** Re-reparent reset blueprints to their existing C++ classes (easiest to hardest):
+
+**Blueprints Ready for Reconversion (C++ classes exist):**
+- ✅ **SpinningArrow** (score 5) - ✅ **DONE** (0 errors, reparented to C++)
+- ✅ **StillCam** (score 7) - ✅ **DONE** (0 errors, reparented to C++)
+- ✅ **Teleporter_Level** (score 7) - ✅ **DONE** (0 errors, reparented to C++)
+- ✅ **Teleporter_Sender** (score 8) - ✅ **DONE** (0 errors, function graphs deleted, error nodes removed)
+- ✅ **Teleporter_Destination** (score 9) - ✅ **DONE** (0 errors, function graphs deleted)
+- ✅ **TargetDummy** (score 8) - ✅ **DONE** (0 errors, reparented to C++)
+- ✅ **BP_Walker** (score 5) - ✅ **DONE** (0 errors, reparented to C++)
+- ⚠️ **LevelVisuals** (score 11) - **NEEDS MANUAL REVIEW** (0 compile errors, but level instance data lost - restored from backup)
+- ⚠️ **LevelButton** (score 13) - **NEEDS MANUAL REVIEW** (0 compile errors after error node removal)
+- ⚠️ **LevelBlock** (score 16) - **NEEDS MANUAL REVIEW** (0 compile errors after error node removal - restored from backup)
+
+**CRITICAL ISSUE ENCOUNTERED (2026-02-01):**
+- **Problem**: LevelVisuals and LevelBlock instances in DefaultLevel.umap lost their configuration data after reparenting
+- **Symptom**: Orange blocks, no fog rendering in level
+- **Root Cause**: Existing level instances have empty EditAnywhere arrays after C++ reparenting (C++ constructor defaults only apply to NEW instances)
+- **Solution Applied**: Restored DefaultLevel.umap, LevelBlock.uasset, and LevelVisuals.uasset from backup at E:\repo\unreal_engine\backup
+- **Status**: Files restored, UE restarted - NEEDS TESTING to verify fog/block colors work correctly
+- **Manual Review Required**: Test level visuals, fog rendering, and block color system in-game
+
+**SPRINT 2 - LEVEL ACTOR PROPERTY PRESERVATION (2026-02-01):**
+- **Status**: ✅ **COMPLETED** - Implementation finished, compilation successful
+- **Implemented Commands**:
+  - `read_actor_properties` - Read all EditAnywhere properties from level actor instances
+  - `set_actor_properties` - Set EditAnywhere properties on level actor instances
+- **Files Modified**:
+  - `Plugins/ClaudeUnrealMCP/Source/ClaudeUnrealMCP/Public/MCPServer.h` - Added function declarations
+  - `Plugins/ClaudeUnrealMCP/Source/ClaudeUnrealMCP/Private/MCPServer.cpp` - Implemented handlers (lines 3491-3625)
+  - `Plugins/ClaudeUnrealMCP/MCPServer/index.js` - Added tool definitions
+  - `AGENTS.md` - Added Sprint 2 documentation with example workflow
+- **Compilation**: ✅ Successful (UETest1Editor compiled with 0 errors)
+- **Next Step**: RESTART Claude Code to pick up new MCP tool definitions, then test the automated conversion workflow on LevelVisuals and LevelBlock
+
+**Reconversion Process (OLD - Without Property Preservation):**
+1. Read blueprint event graph/functions to understand logic
+2. Reparent blueprint to existing C++ class
+3. Delete conflicting blueprint function graphs (if any)
+4. Refresh nodes to fix any stale references
+5. Compile blueprint and verify 0 errors
+6. Save with save_all
+
+**NEW Reconversion Process (WITH Property Preservation - Sprint 2):**
+1. Read blueprint event graph/functions to understand logic
+2. **Identify level instances** using list_actors (find all actors with blueprint class)
+3. **Preserve properties** - For each instance, call read_actor_properties and save result
+4. Reparent blueprint to existing C++ class
+5. Delete conflicting blueprint function graphs (if any)
+6. Refresh nodes to fix any stale references
+7. Compile blueprint and verify 0 errors
+8. **Restore properties** - For each instance, call set_actor_properties with saved properties
+9. Save with save_all
+
+**Test Procedure (AFTER Claude Code Restart):**
+```
+Step 1: Test read_actor_properties
+- Command: read_actor_properties({ actor_name: "LevelVisuals_C_6" })
+- Expected: Returns JSON with LevelStyles array and all EditAnywhere properties
+- Verify: Properties contain fog colors, block colors, etc.
+
+Step 2: Test set_actor_properties
+- Command: set_actor_properties({ actor_name: "LevelVisuals_C_6", properties: <saved_props> })
+- Expected: Returns success message with properties_set count
+- Verify: Actor properties updated in level
+
+Step 3: Test Full Conversion Workflow
+- Use LevelBlock_C_1 (Floor) as test subject
+- Save properties → Reparent → Restore properties → Verify visuals unchanged
+```
 
 ---
 

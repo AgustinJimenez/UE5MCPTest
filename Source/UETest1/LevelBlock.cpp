@@ -56,7 +56,53 @@ void ALevelBlock::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// Components are already cached from constructor
+	// Find components by class (handles both new and reparented instances)
+	if (!CachedStaticMesh)
+	{
+		// Try to find by name first, then fall back to any StaticMeshComponent
+		CachedStaticMesh = Cast<UStaticMeshComponent>(GetDefaultSubobjectByName(TEXT("StaticMesh")));
+		if (!CachedStaticMesh)
+		{
+			TArray<UStaticMeshComponent*> MeshComponents;
+			GetComponents<UStaticMeshComponent>(MeshComponents);
+			for (UStaticMeshComponent* MeshComp : MeshComponents)
+			{
+				// Prefer non-TRASH components
+				if (MeshComp && !MeshComp->GetName().Contains(TEXT("TRASH")))
+				{
+					CachedStaticMesh = MeshComp;
+					break;
+				}
+			}
+			// If no non-TRASH found, use any mesh component (including TRASH)
+			if (!CachedStaticMesh && MeshComponents.Num() > 0)
+			{
+				CachedStaticMesh = MeshComponents[0];
+			}
+		}
+	}
+	if (!CachedTextRender)
+	{
+		CachedTextRender = Cast<UTextRenderComponent>(GetDefaultSubobjectByName(TEXT("TextRender")));
+		if (!CachedTextRender)
+		{
+			TArray<UTextRenderComponent*> TextComponents;
+			GetComponents<UTextRenderComponent>(TextComponents);
+			for (UTextRenderComponent* TextComp : TextComponents)
+			{
+				if (TextComp && !TextComp->GetName().Contains(TEXT("TRASH")))
+				{
+					CachedTextRender = TextComp;
+					break;
+				}
+			}
+			if (!CachedTextRender && TextComponents.Num() > 0)
+			{
+				CachedTextRender = TextComponents[0];
+			}
+		}
+	}
+
 	// Create dynamic material instance
 	if (CachedStaticMesh)
 	{
@@ -142,9 +188,31 @@ void ALevelBlock::UpdateMaterials(const FS_GridMaterialParams& Params)
 
 void ALevelBlock::UpdateText()
 {
+	// Find component if not cached
 	if (!CachedTextRender)
 	{
-		return;
+		CachedTextRender = Cast<UTextRenderComponent>(GetDefaultSubobjectByName(TEXT("TextRender")));
+		if (!CachedTextRender)
+		{
+			TArray<UTextRenderComponent*> TextComponents;
+			GetComponents<UTextRenderComponent>(TextComponents);
+			for (UTextRenderComponent* TextComp : TextComponents)
+			{
+				if (TextComp && !TextComp->GetName().Contains(TEXT("TRASH")))
+				{
+					CachedTextRender = TextComp;
+					break;
+				}
+			}
+			if (!CachedTextRender && TextComponents.Num() > 0)
+			{
+				CachedTextRender = TextComponents[0];
+			}
+		}
+		if (!CachedTextRender)
+		{
+			return;
+		}
 	}
 
 	if (AutoNameFromHeight)

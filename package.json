@@ -2,6 +2,7 @@
   "name": "ue5-mcp-tools",
   "private": true,
   "scripts": {
-    "restart:ue": "osascript -e \"tell application \\\"UnrealEditor\\\" to quit\" && open UETest1.uproject && sleep 20"
+    "restart:ue": "osascript -e \"tell application \\\"UnrealEditor\\\" to quit\" && open UETest1.uproject && sleep 20",
+    "restart:ue:win": "powershell -Command \"Stop-Process -Name UnrealEditor -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Start-Process 'E:\\Epic Games\\UE_5.7\\Engine\\Binaries\\Win64\\UnrealEditor.exe' -ArgumentList 'E:\\repo\\unreal_engine\\UE5MCPTest\\UETest1.uproject'\""
   }
 }

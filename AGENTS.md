@@ -78,6 +78,7 @@ Examples of custom tools added to the MCP server:
 - `remove_error_nodes` - Automatically identify and remove nodes causing compilation errors (2026-01-31)
 - `clear_animation_blueprint_tags` - Remove AnimBlueprintExtension_Tag objects to fix tag reference errors (2026-01-31)
 - `clear_anim_graph` - Delete all AnimGraph nodes to rebuild from scratch (2026-01-31)
+- **Sprint 1 - Blueprint Function Creation (2026-02-01):** `create_blueprint_function`, `add_function_input`, `add_function_output`, `rename_blueprint_function` - Programmatically build blueprint functions with parameters
 
 Do not treat the MCP server as a black box with fixed capabilities - modify it as needed to accomplish your tasks.
 
@@ -199,6 +200,51 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 - `clear_animation_blueprint_tags` - Remove AnimBlueprintExtension_Tag objects from animation blueprints to fix 'cannot find referenced node with tag' errors (2026-01-31)
 - `clear_anim_graph` - Delete all nodes from an animation blueprint's AnimGraph, leaving only the root output node (2026-01-31)
 
+**Blueprint Function Creation Commands (Sprint 1 - 2026-02-01):**
+- `create_blueprint_function` - Create a new function in a blueprint with optional metadata flags (is_pure, is_thread_safe, is_const)
+- `add_function_input` - Add an input parameter to an existing blueprint function (supports int, float, bool, string, FVector, FRotator, FTransform, and custom types)
+- `add_function_output` - Add an output parameter (return value) to an existing blueprint function
+- `rename_blueprint_function` - Rename an existing blueprint function
+
+**Level Actor Property Preservation Commands (Sprint 2 - 2026-02-01):**
+- `read_actor_properties` - Read all EditAnywhere properties from a level actor instance. Returns JSON object with property name-value pairs. Use this to preserve actor configuration before blueprint reparenting.
+- `set_actor_properties` - Set EditAnywhere properties on a level actor instance. Accepts JSON object with property name-value pairs (as returned by read_actor_properties). Use this to restore actor configuration after blueprint reparenting.
+
+**IMPORTANT:** After compiling C++ changes to the MCP plugin, you must restart Unreal Editor to load the updated plugin DLL:
+```bash
+# From project root
+npm run restart:ue:win
+```
+This command stops UnrealEditor.exe, waits 2 seconds, then reopens the project. After restart, reconnect MCP with `/mcp` command in Claude Code.
+
+**Purpose:** These commands enable full automated blueprint-to-C++ conversion by preserving level instance data. When reparenting a blueprint to C++, C++ constructor defaults don't persist to existing level instances - these commands solve that by:
+1. Reading instance properties before reparenting (save to JSON)
+2. Reparenting blueprint to C++
+3. Restoring instance properties after reparenting
+4. Saving the level
+
+**Example Workflow:**
+```javascript
+// Step 1: Read actor properties
+const props = await read_actor_properties({ actor_name: "LevelVisuals_C_6" });
+
+// Step 2: Reparent blueprint to C++
+await reparent_blueprint({
+  blueprint_path: "/Game/Levels/LevelPrototyping/LevelVisuals",
+  parent_class: "ALevelVisuals"
+});
+await compile_blueprint({ path: "/Game/Levels/LevelPrototyping/LevelVisuals" });
+
+// Step 3: Restore properties
+await set_actor_properties({
+  actor_name: "LevelVisuals_C_6",
+  properties: props.properties
+});
+
+// Step 4: Save level
+await save_all();
+```
+
 ## Recent MCP Improvements
 
 **Connection Management (Fixed)**
@@ -300,7 +346,37 @@ Investigation into why C++ structs can't be found via MCP tools revealed key ins
 
 **Alternative**: For complex animation blueprints, consider keeping blueprint AnimGraph intact and only converting EventGraph/function logic to C++, or wait for automated tools like NodeToCode to support UE 5.7+.
 
+## MCP Enhancement Sprints (2026-02-01)
+
+**Background**: Research into other UE5 MCP projects (chongdashu/unreal-mcp, flopperam/unreal-engine-mcp, ChiR24/Unreal_mcp, ayeletstudioindia/unreal-analyzer-mcp) identified gaps in our MCP server capabilities. Key findings documented in `FEATURE_RESEARCH.md` and implementation plan in `IMPLEMENTATION_PLAN.md`.
+
+**Sprint 1: Blueprint Function Creation** ✅ IMPLEMENTED
+- **Goal**: Programmatically create and modify blueprint functions to support automated refactoring and hybrid C++/Blueprint workflows
+- **Commands Added**:
+  - `create_blueprint_function` - Create new function with metadata flags (BlueprintThreadSafe, BlueprintPure, Const)
+  - `add_function_input` - Add input parameters with type validation (int, float, bool, string, FVector, FRotator, FTransform, custom types)
+  - `add_function_output` - Add output parameters (return values)
+  - `rename_blueprint_function` - Rename existing functions
+- **Implementation**: Uses FBlueprintEditorUtils::CreateNewGraph(), UEdGraphSchema_K2::CreateDefaultNodesForGraph(), and UK2Node_FunctionEntry/Result pin creation
+- **Status**: Implemented 2026-02-01, testing pending
+
+**Sprint 2: Blueprint Node Manipulation** (PLANNED)
+- `add_node_to_graph` - Add any node type to blueprint graphs
+- `connect_nodes` - Wire pins between nodes with type validation
+- `delete_node_from_graph` - Remove specific nodes
+- `set_node_property` - Modify node properties and pin defaults
+
+**Sprint 3: Blueprint Graph Analysis** (PLANNED)
+- `analyze_graph_complexity` - Calculate metrics (node count, depth, branching)
+- `find_conversion_candidates` - Identify simple functions suitable for C++ conversion
+- `detect_graph_patterns` - Pattern matching for common logic structures
+
+**Priority**: These enhancements directly support our blueprint-to-C++ conversion workflow by enabling automated refactoring and analysis.
+
 ## TODO
 
+- [ ] Test Sprint 1 blueprint function creation commands
+- [ ] Implement Sprint 2: Node manipulation
+- [ ] Implement Sprint 3: Graph analysis
 - [ ] Convert blueprints to C++ using incremental approach (data types first, then logic)
 - [ ] Consider converting enums (E_MovementMode, E_Gait, E_Stance, etc.) to C++ as foundation for further conversion
