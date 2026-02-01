@@ -110,8 +110,29 @@ void USandboxCharacter_CMC_ABP::Update_EssentialValues()
 
 void USandboxCharacter_CMC_ABP::Update_States()
 {
-	// TODO: Implement state update logic from blueprint
-	// This will update MovementState, Gait, Stance, etc.
+	// Save current values to last frame variables
+	MovementMode_LastFrame = MovementMode;
+	RotationMode_LastFrame = RotationMode;
+	MovementState_LastFrame = MovementState;
+	Gait_LastFrame = Gait;
+	Stance_LastFrame = Stance;
+
+	// Update current values from CharacterProperties
+	MovementMode = CharacterProperties.MovementMode;
+	RotationMode = CharacterProperties.RotationMode;
+	Gait = CharacterProperties.Gait;
+	Stance = CharacterProperties.Stance;
+
+	// Update MovementState based on whether character is moving
+	// IsMoving() checks if the character has velocity
+	if (Speed2D > 0.0)
+	{
+		MovementState = E_MovementState::Moving;
+	}
+	else
+	{
+		MovementState = E_MovementState::Idle;
+	}
 }
 
 void USandboxCharacter_CMC_ABP::Update_MovementDirection()
