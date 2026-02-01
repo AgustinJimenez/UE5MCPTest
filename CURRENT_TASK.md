@@ -27,6 +27,21 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 - ✅ **LevelVisuals** - Reparented to ALevelVisuals, properties restored
 - ✅ **LevelBlock** - Reparented to ALevelBlock (33 instances)
 - ✅ **LevelButton** - Reparented to ALevelButton
+- ✅ **MCP Fix** - Added `RerunConstructionScripts()` call to `set_actor_properties` (requires UE restart)
+
+### Known Issue - Level Visuals Not Applied After Reparenting
+**Symptom:** Blocks appear yellowish/orange, no purple fog, lighting looks wrong after reparenting LevelVisuals/LevelBlock to C++.
+
+**Root Cause:** C++ constructor defaults and OnConstruction initialization don't automatically apply to existing level instances. The `UpdateLevelVisuals()` function needs to be called to apply the LevelStyles colors to all LevelBlock actors.
+
+**Solution (choose one):**
+1. **Use MCP `reconstruct_actor` command** - `reconstruct_actor({ actor_name: "LevelVisuals_C_6" })`
+2. **Press Play** in the editor - triggers BeginPlay which calls UpdateLevelVisuals()
+3. **Move the LevelVisuals actor** in the viewport - triggers OnConstruction
+
+**MCP Enhancements (2026-02-01):**
+- Added `reconstruct_actor` command - explicitly triggers `RerunConstructionScripts()` on any actor
+- Added `RerunConstructionScripts()` call to `set_actor_properties` - properties + reconstruction in one call
 
 ---
 

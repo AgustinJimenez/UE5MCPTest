@@ -71,6 +71,7 @@ private:
 	// Level actor property commands (Sprint 2)
 	FString HandleReadActorProperties(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSetActorProperties(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReconstructActor(const TSharedPtr<FJsonObject>& Params);
 
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));

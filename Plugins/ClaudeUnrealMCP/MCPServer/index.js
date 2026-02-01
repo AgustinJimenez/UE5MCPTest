@@ -900,6 +900,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["actor_name", "properties"],
         },
       },
+      {
+        name: "reconstruct_actor",
+        description: "Trigger OnConstruction on a level actor by calling RerunConstructionScripts(). Use this after reparenting blueprints to C++ to apply C++ initialization logic (e.g., UpdateLevelVisuals, UpdateMaterials) to existing level instances.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            actor_name: {
+              type: "string",
+              description: "Name of the actor in the level (e.g., LevelVisuals_C_6)",
+            },
+          },
+          required: ["actor_name"],
+        },
+      },
     ],
   };
 });

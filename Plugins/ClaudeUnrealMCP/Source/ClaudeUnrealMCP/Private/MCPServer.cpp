@@ -464,6 +464,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleSetActorProperties(Params);
 	}
+	else if (Command == TEXT("reconstruct_actor"))
+	{
+		return HandleReconstructActor(Params);
+	}
 
 	return MakeError(FString::Printf(TEXT("Unknown command: %s"), *Command));
 }
@@ -4114,6 +4118,9 @@ FString FMCPServer::HandleSetActorProperties(const TSharedPtr<FJsonObject>& Para
 		PropertiesSet++;
 	}
 
+	// Rerun construction scripts to trigger OnConstruction (applies property changes like UpdateLevelVisuals)
+	FoundActor->RerunConstructionScripts();
+
 	// Mark the actor for saving
 	FoundActor->MarkPackageDirty();
 
@@ -4121,6 +4128,55 @@ FString FMCPServer::HandleSetActorProperties(const TSharedPtr<FJsonObject>& Para
 	Data->SetStringField(TEXT("message"), TEXT("Actor properties set successfully"));
 	Data->SetStringField(TEXT("actor_name"), ActorName);
 	Data->SetNumberField(TEXT("properties_set"), PropertiesSet);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleReconstructActor(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("actor_name")))
+	{
+		return MakeError(TEXT("Missing required parameter: 'actor_name'"));
+	}
+
+	const FString ActorName = Params->GetStringField(TEXT("actor_name"));
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		return MakeError(TEXT("No world available"));
+	}
+
+	// Find the actor by name
+	AActor* FoundActor = nullptr;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (Actor && Actor->GetName() == ActorName)
+		{
+			FoundActor = Actor;
+			break;
+		}
+	}
+
+	if (!FoundActor)
+	{
+		return MakeError(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+	}
+
+	// Mark the actor as modified
+	FoundActor->Modify();
+
+	// Rerun construction scripts to trigger OnConstruction
+	FoundActor->RerunConstructionScripts();
+
+	// Mark the actor for saving
+	FoundActor->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Actor reconstructed successfully"));
+	Data->SetStringField(TEXT("actor_name"), ActorName);
+	Data->SetStringField(TEXT("actor_class"), FoundActor->GetClass()->GetName());
 
 	return MakeResponse(true, Data);
 }

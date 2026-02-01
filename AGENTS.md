@@ -208,7 +208,8 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 
 **Level Actor Property Preservation Commands (Sprint 2 - 2026-02-01):**
 - `read_actor_properties` - Read all EditAnywhere properties from a level actor instance. Returns JSON object with property name-value pairs. Use this to preserve actor configuration before blueprint reparenting.
-- `set_actor_properties` - Set EditAnywhere properties on a level actor instance. Accepts JSON object with property name-value pairs (as returned by read_actor_properties). Use this to restore actor configuration after blueprint reparenting.
+- `set_actor_properties` - Set EditAnywhere properties on a level actor instance. Accepts JSON object with property name-value pairs (as returned by read_actor_properties). Also triggers `RerunConstructionScripts()` to apply OnConstruction logic.
+- `reconstruct_actor` - Trigger OnConstruction on a level actor by calling `RerunConstructionScripts()`. Use this after reparenting blueprints to C++ to apply C++ initialization logic (e.g., UpdateLevelVisuals, UpdateMaterials) to existing level instances that weren't automatically updated.
 
 **Interface Function Parameter Modification (2026-02-01):**
 - `list_structs` - Debug command: List all registered UScriptStruct objects matching a pattern. Useful for discovering struct names available via reflection. Note: UE strips the 'F' prefix from C++ struct names (e.g., `FS_PlayerInputState` becomes `S_PlayerInputState` in reflection).
@@ -225,7 +226,24 @@ This command stops UnrealEditor.exe, waits 2 seconds, then reopens the project. 
 1. Reading instance properties before reparenting (save to JSON)
 2. Reparenting blueprint to C++
 3. Restoring instance properties after reparenting
-4. Saving the level
+4. Triggering OnConstruction to apply C++ initialization logic
+5. Saving the level
+
+**CRITICAL: OnConstruction Triggering After Reparenting**
+
+When a blueprint with OnConstruction logic (e.g., `UpdateLevelVisuals()`, `UpdateMaterials()`) is reparented to C++, existing level instances do NOT automatically run the C++ OnConstruction code. This causes issues like:
+- Visual systems not applying colors/materials to dependent actors
+- Components not being properly initialized
+- Default values from C++ constructor not being applied
+
+**Solution:** After reparenting and restoring properties, call `reconstruct_actor` on the actor to trigger OnConstruction:
+```javascript
+await reconstruct_actor({ actor_name: "LevelVisuals_C_6" });
+```
+
+Alternatively:
+- Press Play in the editor (triggers BeginPlay which often calls the same initialization)
+- Move the actor in the viewport (triggers OnConstruction)
 
 **Example Workflow:**
 ```javascript
@@ -239,13 +257,16 @@ await reparent_blueprint({
 });
 await compile_blueprint({ path: "/Game/Levels/LevelPrototyping/LevelVisuals" });
 
-// Step 3: Restore properties
+// Step 3: Restore properties (also triggers RerunConstructionScripts)
 await set_actor_properties({
   actor_name: "LevelVisuals_C_6",
   properties: props.properties
 });
 
-// Step 4: Save level
+// Step 4: If visuals still not applied, explicitly reconstruct
+await reconstruct_actor({ actor_name: "LevelVisuals_C_6" });
+
+// Step 5: Save level
 await save_all();
 ```
 
