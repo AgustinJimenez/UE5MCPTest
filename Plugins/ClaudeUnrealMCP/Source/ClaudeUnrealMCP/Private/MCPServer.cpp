@@ -300,6 +300,18 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleListActors(Params);
 	}
+	else if (Command == TEXT("find_actors_by_name"))
+	{
+		return HandleFindActorsByName(Params);
+	}
+	else if (Command == TEXT("get_actor_material_info"))
+	{
+		return HandleGetActorMaterialInfo(Params);
+	}
+	else if (Command == TEXT("get_scene_summary"))
+	{
+		return HandleGetSceneSummary(Params);
+	}
 	else if (Command == TEXT("ping"))
 	{
 		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -3632,4 +3644,245 @@ FString FMCPServer::HandleSetActorProperties(const TSharedPtr<FJsonObject>& Para
 	Data->SetNumberField(TEXT("properties_set"), PropertiesSet);
 
 	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleFindActorsByName(const TSharedPtr<FJsonObject>& Params)
+{
+	FString NamePattern = Params->GetStringField(TEXT("name_pattern"));
+	FString ActorClass = Params->HasField(TEXT("actor_class")) ? Params->GetStringField(TEXT("actor_class")) : TEXT("");
+
+	if (NamePattern.IsEmpty())
+	{
+		return MakeError(TEXT("name_pattern parameter is required"));
+	}
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		return MakeError(TEXT("No world available"));
+	}
+
+	// Convert wildcard pattern to regex-like matching
+	// * = any characters, ? = single character
+	FString Pattern = NamePattern;
+	Pattern.ReplaceInline(TEXT("*"), TEXT(".*"));
+	Pattern.ReplaceInline(TEXT("?"), TEXT("."));
+
+	TArray<TSharedPtr<FJsonValue>> MatchedActors;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (!Actor) continue;
+
+		// Filter by class if specified
+		if (!ActorClass.IsEmpty() && Actor->GetClass()->GetName() != ActorClass)
+		{
+			continue;
+		}
+
+		// Check if name matches pattern (simple wildcard matching)
+		FString ActorName = Actor->GetName();
+		bool bMatches = false;
+
+		if (NamePattern.Contains(TEXT("*")) || NamePattern.Contains(TEXT("?")))
+		{
+			// Simple wildcard matching - check if pattern matches
+			FString Remaining = ActorName;
+			TArray<FString> Parts;
+			NamePattern.ParseIntoArray(Parts, TEXT("*"), true);
+
+			if (Parts.Num() == 0)
+			{
+				bMatches = true; // Pattern is just "*"
+			}
+			else
+			{
+				bMatches = true;
+				int32 SearchStart = 0;
+
+				for (int32 i = 0; i < Parts.Num(); i++)
+				{
+					if (Parts[i].IsEmpty()) continue;
+
+					int32 FoundIndex = Remaining.Find(Parts[i], ESearchCase::IgnoreCase, ESearchDir::FromStart, SearchStart);
+					if (FoundIndex == INDEX_NONE || (i == 0 && !NamePattern.StartsWith(TEXT("*")) && FoundIndex != 0))
+					{
+						bMatches = false;
+						break;
+					}
+					SearchStart = FoundIndex + Parts[i].Len();
+				}
+
+				// Check end match
+				if (bMatches && !NamePattern.EndsWith(TEXT("*")) && Parts.Num() > 0)
+				{
+					if (!Remaining.EndsWith(Parts.Last()))
+					{
+						bMatches = false;
+					}
+				}
+			}
+		}
+		else
+		{
+			// Exact match or contains
+			bMatches = ActorName.Contains(NamePattern);
+		}
+
+		if (bMatches)
+		{
+			TSharedPtr<FJsonObject> ActorObj = MakeShared<FJsonObject>();
+			ActorObj->SetStringField(TEXT("name"), Actor->GetName());
+			ActorObj->SetStringField(TEXT("class"), Actor->GetClass()->GetName());
+			ActorObj->SetStringField(TEXT("label"), Actor->GetActorLabel());
+
+			FVector Location = Actor->GetActorLocation();
+			ActorObj->SetStringField(TEXT("location"), FString::Printf(TEXT("%.1f, %.1f, %.1f"), Location.X, Location.Y, Location.Z));
+
+			MatchedActors.Add(MakeShared<FJsonValueObject>(ActorObj));
+		}
+	}
+
+	TSharedPtr<FJsonObject> ResponseData = MakeShared<FJsonObject>();
+	ResponseData->SetArrayField(TEXT("actors"), MatchedActors);
+	ResponseData->SetNumberField(TEXT("count"), MatchedActors.Num());
+	ResponseData->SetStringField(TEXT("pattern"), NamePattern);
+
+	return MakeResponse(true, ResponseData);
+}
+
+FString FMCPServer::HandleGetActorMaterialInfo(const TSharedPtr<FJsonObject>& Params)
+{
+	FString ActorName = Params->GetStringField(TEXT("actor_name"));
+
+	if (ActorName.IsEmpty())
+	{
+		return MakeError(TEXT("actor_name parameter is required"));
+	}
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		return MakeError(TEXT("No world available"));
+	}
+
+	// Find the actor
+	AActor* FoundActor = nullptr;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (It->GetName() == ActorName)
+		{
+			FoundActor = *It;
+			break;
+		}
+	}
+
+	if (!FoundActor)
+	{
+		return MakeError(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+	}
+
+	// Collect material information from all components
+	TArray<TSharedPtr<FJsonValue>> MaterialsArray;
+
+	TArray<UPrimitiveComponent*> PrimitiveComponents;
+	FoundActor->GetComponents<UPrimitiveComponent>(PrimitiveComponents);
+
+	for (UPrimitiveComponent* PrimComp : PrimitiveComponents)
+	{
+		if (!PrimComp) continue;
+
+		int32 NumMaterials = PrimComp->GetNumMaterials();
+		for (int32 i = 0; i < NumMaterials; i++)
+		{
+			UMaterialInterface* Material = PrimComp->GetMaterial(i);
+			if (!Material) continue;
+
+			TSharedPtr<FJsonObject> MaterialObj = MakeShared<FJsonObject>();
+			MaterialObj->SetStringField(TEXT("component"), PrimComp->GetName());
+			MaterialObj->SetNumberField(TEXT("slot"), i);
+			MaterialObj->SetStringField(TEXT("material_name"), Material->GetName());
+			MaterialObj->SetStringField(TEXT("material_path"), Material->GetPathName());
+			MaterialObj->SetStringField(TEXT("material_class"), Material->GetClass()->GetName());
+
+			// Check if it's a dynamic material instance
+			if (UMaterialInstanceDynamic* DynMaterial = Cast<UMaterialInstanceDynamic>(Material))
+			{
+				MaterialObj->SetBoolField(TEXT("is_dynamic"), true);
+				if (DynMaterial->Parent)
+				{
+					MaterialObj->SetStringField(TEXT("parent_material"), DynMaterial->Parent->GetPathName());
+				}
+			}
+			else
+			{
+				MaterialObj->SetBoolField(TEXT("is_dynamic"), false);
+			}
+
+			MaterialsArray.Add(MakeShared<FJsonValueObject>(MaterialObj));
+		}
+	}
+
+	TSharedPtr<FJsonObject> ResponseData = MakeShared<FJsonObject>();
+	ResponseData->SetStringField(TEXT("actor_name"), ActorName);
+	ResponseData->SetStringField(TEXT("actor_class"), FoundActor->GetClass()->GetName());
+	ResponseData->SetArrayField(TEXT("materials"), MaterialsArray);
+	ResponseData->SetNumberField(TEXT("material_count"), MaterialsArray.Num());
+
+	return MakeResponse(true, ResponseData);
+}
+
+FString FMCPServer::HandleGetSceneSummary(const TSharedPtr<FJsonObject>& Params)
+{
+	bool bIncludeDetails = Params->HasField(TEXT("include_details")) ? Params->GetBoolField(TEXT("include_details")) : true;
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		return MakeError(TEXT("No world available"));
+	}
+
+	// Count actors by class
+	TMap<FString, int32> ActorCountByClass;
+	int32 TotalActors = 0;
+
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (!Actor) continue;
+
+		FString ClassName = Actor->GetClass()->GetName();
+		ActorCountByClass.FindOrAdd(ClassName)++;
+		TotalActors++;
+	}
+
+	// Build response
+	TSharedPtr<FJsonObject> ResponseData = MakeShared<FJsonObject>();
+	ResponseData->SetStringField(TEXT("level_name"), World->GetName());
+	ResponseData->SetNumberField(TEXT("total_actors"), TotalActors);
+	ResponseData->SetNumberField(TEXT("unique_actor_classes"), ActorCountByClass.Num());
+
+	if (bIncludeDetails)
+	{
+		TSharedPtr<FJsonObject> ClassBreakdown = MakeShared<FJsonObject>();
+
+		// Sort by count (highest first)
+		TArray<TPair<FString, int32>> SortedCounts;
+		for (const auto& Pair : ActorCountByClass)
+		{
+			SortedCounts.Add(Pair);
+		}
+		SortedCounts.Sort([](const TPair<FString, int32>& A, const TPair<FString, int32>& B) {
+			return A.Value > B.Value;
+		});
+
+		for (const auto& Pair : SortedCounts)
+		{
+			ClassBreakdown->SetNumberField(Pair.Key, Pair.Value);
+		}
+
+		ResponseData->SetObjectField(TEXT("actor_classes"), ClassBreakdown);
+	}
+
+	return MakeResponse(true, ResponseData);
 }

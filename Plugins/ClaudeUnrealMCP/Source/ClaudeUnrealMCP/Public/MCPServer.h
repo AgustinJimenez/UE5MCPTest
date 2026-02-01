@@ -34,6 +34,9 @@ private:
 	FString HandleReadUserDefinedStruct(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadUserDefinedEnum(const TSharedPtr<FJsonObject>& Params);
 	FString HandleListActors(const TSharedPtr<FJsonObject>& Params);
+	FString HandleFindActorsByName(const TSharedPtr<FJsonObject>& Params);
+	FString HandleGetActorMaterialInfo(const TSharedPtr<FJsonObject>& Params);
+	FString HandleGetSceneSummary(const TSharedPtr<FJsonObject>& Params);
 
 	// Blueprint writing commands
 	FString HandleAddComponent(const TSharedPtr<FJsonObject>& Params);

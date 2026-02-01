@@ -148,6 +148,50 @@ Step 3: Test Full Conversion Workflow
 - Save properties → Reparent → Restore properties → Verify visuals unchanged
 ```
 
+**SPRINT 3 - ENHANCED MCP SCENE INSPECTION TOOLS (2026-02-01):**
+- **Status**: ⏳ **PENDING TESTING** - Implementation complete, compilation successful
+- **Motivation**: Research into other Unreal Engine MCP projects revealed missing scene inspection capabilities that would improve debugging and conversion workflows
+- **Implemented Commands**:
+  - `find_actors_by_name` - Search for actors using wildcard patterns (`*` and `?`) with optional class filtering
+  - `get_actor_material_info` - Inspect all materials on an actor's components (materials, slots, dynamic instances, parent materials)
+  - `get_scene_summary` - Get comprehensive level overview with actor counts by class, sorted by frequency
+- **Files Modified**:
+  - `Plugins/ClaudeUnrealMCP/MCPServer/index.js` - Added tool definitions (3 new tools)
+  - `Plugins/ClaudeUnrealMCP/Source/ClaudeUnrealMCP/Private/MCPServer.cpp` - Implemented handlers (HandleFindActorsByName, HandleGetActorMaterialInfo, HandleGetSceneSummary)
+  - `Plugins/ClaudeUnrealMCP/Source/ClaudeUnrealMCP/Public/MCPServer.h` - Added function declarations
+- **API Compatibility Fixes**:
+  - Fixed UE5.7 API: `GetComponentsByClass()` → `GetComponents<UPrimitiveComponent>()`
+  - Fixed UE5.7 API: `GetMaterials()` → `GetNumMaterials()` + `GetMaterial(i)`
+- **Compilation**: ✅ Successful (UETest1Editor compiled with 0 errors)
+- **Research Sources**:
+  - [flopperam/unreal-engine-mcp](https://github.com/flopperam/unreal-engine-mcp) - Advanced Blueprint analysis and actor inspection
+  - [ChiR24/Unreal_mcp](https://github.com/ChiR24/Unreal_mcp) - C++ Automation Bridge with object introspection
+  - [chongdashu/unreal-mcp](https://github.com/chongdashu/unreal-mcp) - Natural language control interface
+
+**Test Procedure (PENDING):**
+```
+Step 1: Test find_actors_by_name
+- Command: find_actors_by_name({ name_pattern: "LevelBlock*" })
+- Expected: Returns all LevelBlock instances with names, classes, locations
+- Command: find_actors_by_name({ name_pattern: "*Traversable*", actor_class: "LevelBlock_Traversable_C" })
+- Expected: Returns only traversable blocks
+
+Step 2: Test get_actor_material_info
+- Command: get_actor_material_info({ actor_name: "LevelBlock_C_0" })
+- Expected: Returns material info showing DynamicMaterial on StaticMesh component
+- Verify: Shows material path, dynamic instance status, parent material
+
+Step 3: Test get_scene_summary
+- Command: get_scene_summary({ include_details: true })
+- Expected: Returns level name, total actors, actor counts by class
+- Verify: Shows breakdown with LevelBlock_C, LevelBlock_Traversable_C counts
+```
+
+**Use Cases:**
+- **Debugging Material Issues**: Quickly inspect which actors have DynamicMaterial vs None
+- **Finding Specific Actors**: Search for actors by pattern instead of listing all 108+ actors
+- **Scene Analysis**: Get overview of level composition for documentation or debugging
+
 ---
 
 ## NEW INCREMENTAL CONVERSION STRATEGY (2026-02-01)

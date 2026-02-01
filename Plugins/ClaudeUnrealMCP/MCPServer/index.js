@@ -294,6 +294,51 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {},
         },
       },
+      {
+        name: "find_actors_by_name",
+        description: "Search for actors by name pattern (supports wildcards: * for any characters, ? for single character)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name_pattern: {
+              type: "string",
+              description: "Name pattern to search for (e.g., 'LevelBlock*', '*Traversable*', 'Player?')",
+            },
+            actor_class: {
+              type: "string",
+              description: "Optional: Filter by actor class (e.g., 'LevelBlock_C', 'StaticMeshActor')",
+            },
+          },
+          required: ["name_pattern"],
+        },
+      },
+      {
+        name: "get_actor_material_info",
+        description: "Get detailed material information from an actor's components (materials, textures, parameters)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            actor_name: {
+              type: "string",
+              description: "Name of the actor in the level (e.g., LevelBlock_C_0)",
+            },
+          },
+          required: ["actor_name"],
+        },
+      },
+      {
+        name: "get_scene_summary",
+        description: "Get a comprehensive overview of the current level (actor counts by class, level info, performance stats)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            include_details: {
+              type: "boolean",
+              description: "Include detailed breakdown of actor types (default: true)",
+            },
+          },
+        },
+      },
       // Write commands
       {
         name: "add_component",
