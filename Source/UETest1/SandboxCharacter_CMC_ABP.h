@@ -85,9 +85,8 @@ public:
 	E_Stance Stance_LastFrame = E_Stance::Stand;
 
 	// Character properties
-	// TODO: Convert S_CharacterPropertiesForAnimation struct to C++
-	// UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
-	// struct FS_CharacterPropertiesForAnimation CharacterProperties;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
+	FCharacterPropertiesForAnimation CharacterProperties;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character")
 	FTransform CharacterTransform;
@@ -201,12 +200,11 @@ public:
 	double OffsetRootTranslationRadius = 0.0;
 
 	// Blend stack
-	// TODO: Convert S_BlendStackInputs struct to C++
-	// UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BlendStack")
-	// struct FS_BlendStackInputs BlendStackInputs;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BlendStack")
+	FBlendStackInputs BlendStackInputs;
 
-	// UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BlendStack")
-	// struct FS_BlendStackInputs Previous_BlendStackInputs;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BlendStack")
+	FBlendStackInputs Previous_BlendStackInputs;
 
 	// State machine
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "StateMachine")
