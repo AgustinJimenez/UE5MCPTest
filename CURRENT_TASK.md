@@ -18,16 +18,15 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 
 | Category | Count | Status |
 |----------|-------|--------|
-| **Need Re-Reparenting** (Content reset) | 3 | LevelBlock, LevelVisuals, LevelButton - C++ classes exist, need reparent + property restore |
 | **Need Function Graphs Moved to C++** | 1 | GM_Sandbox - has CyclePawn/CycleVisualOverride in Blueprint |
 | **Cannot Convert** (Blueprint-only bases) | ~15 | MovementModes (SmoothWalkingMode), CameraDirector, StateTree tasks, AnimModifiers |
 | **Too Complex** (100K+ char graphs) | ~5 | AC_TraversalLogic, STT_FindSmartObject, AC_SmartObjectAnimation |
 | **Already Have C++ Parents** | ~25 | Blueprint instances configuring C++ classes |
 
-### Quick Actions Available
-1. **LevelVisuals** - Reparent to ALevelVisuals + restore properties (property data saved above)
-2. **LevelBlock** - Reparent to ALevelBlock + restore ~33 instances
-3. **LevelButton** - Reparent to ALevelButton
+### Recently Completed (2026-02-01)
+- ✅ **LevelVisuals** - Reparented to ALevelVisuals, properties restored
+- ✅ **LevelBlock** - Reparented to ALevelBlock (33 instances)
+- ✅ **LevelButton** - Reparented to ALevelButton
 
 ---
 

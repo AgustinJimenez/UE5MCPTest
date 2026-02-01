@@ -48,6 +48,7 @@ private:
 	FString HandleSaveAsset(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSaveAll(const TSharedPtr<FJsonObject>& Params);
 	FString HandleDeleteInterfaceFunction(const TSharedPtr<FJsonObject>& Params);
+	FString HandleModifyInterfaceFunctionParameter(const TSharedPtr<FJsonObject>& Params);
 	FString HandleDeleteFunctionGraph(const TSharedPtr<FJsonObject>& Params);
 	FString HandleClearEventGraph(const TSharedPtr<FJsonObject>& Params);
 	FString HandleRefreshNodes(const TSharedPtr<FJsonObject>& Params);
