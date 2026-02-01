@@ -3,4 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Modules/ModuleManager.h"
+
+class FUETest1Module : public FDefaultGameModuleImpl
+{
+public:
+    virtual void StartupModule() override;
+};
 

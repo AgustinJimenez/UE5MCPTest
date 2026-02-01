@@ -210,6 +210,10 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 - `read_actor_properties` - Read all EditAnywhere properties from a level actor instance. Returns JSON object with property name-value pairs. Use this to preserve actor configuration before blueprint reparenting.
 - `set_actor_properties` - Set EditAnywhere properties on a level actor instance. Accepts JSON object with property name-value pairs (as returned by read_actor_properties). Use this to restore actor configuration after blueprint reparenting.
 
+**Interface Function Parameter Modification (2026-02-01):**
+- `list_structs` - Debug command: List all registered UScriptStruct objects matching a pattern. Useful for discovering struct names available via reflection. Note: UE strips the 'F' prefix from C++ struct names (e.g., `FS_PlayerInputState` becomes `S_PlayerInputState` in reflection).
+- `modify_interface_function_parameter` - Modify a parameter type in a Blueprint Interface function. Can change struct types between Blueprint and C++ versions. **Warning:** Changing between Blueprint structs (at `/Game/...`) and C++ structs (at `/Script/...`) will cause "Only exactly matching structures are considered compatible" errors in all blueprints using that interface until they are also updated.
+
 **IMPORTANT:** After compiling C++ changes to the MCP plugin, you must restart Unreal Editor to load the updated plugin DLL:
 ```bash
 # From project root

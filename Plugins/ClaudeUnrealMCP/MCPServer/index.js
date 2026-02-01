@@ -500,6 +500,49 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "list_structs",
+        description: "Debug command: List all registered UScriptStruct objects matching a pattern. Useful for discovering discoverable struct names.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pattern: {
+              type: "string",
+              description: "Pattern to filter struct names (e.g., 'FS_', 'CharacterProperties'). Default: 'FS_'",
+            },
+          },
+        },
+      },
+      {
+        name: "modify_interface_function_parameter",
+        description: "Modify a parameter type in a Blueprint Interface function. Note: UE strips the 'F' prefix from C++ struct names in reflection (e.g., FS_PlayerInputState becomes S_PlayerInputState). Use list_structs to find discoverable names.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            interface_path: {
+              type: "string",
+              description: "Full path to the interface asset",
+            },
+            function_name: {
+              type: "string",
+              description: "Name of the function to modify",
+            },
+            parameter_name: {
+              type: "string",
+              description: "Name of the parameter to modify (e.g., 'ReturnValue' for return type)",
+            },
+            new_type: {
+              type: "string",
+              description: "New type path (e.g., '/Script/UETest1.S_PlayerInputState' for C++ struct, '/Game/Blueprints/Data/S_PlayerInputState.S_PlayerInputState' for Blueprint struct)",
+            },
+            is_output: {
+              type: "boolean",
+              description: "True if modifying an output/return parameter, false for input parameters. Default: false",
+            },
+          },
+          required: ["interface_path", "function_name", "parameter_name", "new_type"],
+        },
+      },
+      {
         name: "delete_function_graph",
         description: "Delete a function graph from a Blueprint or Blueprint Function Library",
         inputSchema: {

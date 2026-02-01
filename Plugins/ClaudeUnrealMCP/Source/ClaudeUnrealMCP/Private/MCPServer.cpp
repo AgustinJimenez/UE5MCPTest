@@ -322,6 +322,34 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 		Data->SetStringField(TEXT("message"), TEXT("pong"));
 		return MakeResponse(true, Data);
 	}
+	else if (Command == TEXT("list_structs"))
+	{
+		// Debug command to list all registered UScriptStruct objects matching a pattern
+		FString Pattern = TEXT("FS_");
+		if (Params.IsValid() && Params->HasField(TEXT("pattern")))
+		{
+			Pattern = Params->GetStringField(TEXT("pattern"));
+		}
+
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> StructsArray;
+
+		for (TObjectIterator<UScriptStruct> It; It; ++It)
+		{
+			UScriptStruct* Struct = *It;
+			if (Struct->GetName().Contains(Pattern))
+			{
+				TSharedPtr<FJsonObject> StructInfo = MakeShared<FJsonObject>();
+				StructInfo->SetStringField(TEXT("name"), Struct->GetName());
+				StructInfo->SetStringField(TEXT("path"), Struct->GetPathName());
+				StructsArray.Add(MakeShared<FJsonValueObject>(StructInfo));
+			}
+		}
+
+		Data->SetArrayField(TEXT("structs"), StructsArray);
+		Data->SetNumberField(TEXT("count"), StructsArray.Num());
+		return MakeResponse(true, Data);
+	}
 	// Write commands
 	else if (Command == TEXT("add_component"))
 	{
@@ -354,6 +382,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	else if (Command == TEXT("delete_interface_function"))
 	{
 		return HandleDeleteInterfaceFunction(Params);
+	}
+	else if (Command == TEXT("modify_interface_function_parameter"))
+	{
+		return HandleModifyInterfaceFunctionParameter(Params);
 	}
 	else if (Command == TEXT("delete_function_graph"))
 	{
@@ -464,6 +496,11 @@ FString FMCPServer::HandleListBlueprints(const TSharedPtr<FJsonObject>& Params)
 	TArray<FAssetData> Assets;
 	AssetRegistry.Get().GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), Assets);
 
+	// Also include Animation Blueprints
+	TArray<FAssetData> AnimAssets;
+	AssetRegistry.Get().GetAssetsByClass(UAnimBlueprint::StaticClass()->GetClassPathName(), AnimAssets);
+	Assets.Append(AnimAssets);
+
 	TArray<TSharedPtr<FJsonValue>> BlueprintArray;
 	for (const FAssetData& Asset : Assets)
 	{
@@ -502,6 +539,11 @@ FString FMCPServer::HandleCheckAllBlueprints(const TSharedPtr<FJsonObject>& Para
 
 	TArray<FAssetData> Assets;
 	AssetRegistry.Get().GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), Assets);
+
+	// Also include Animation Blueprints
+	TArray<FAssetData> AnimAssets;
+	AssetRegistry.Get().GetAssetsByClass(UAnimBlueprint::StaticClass()->GetClassPathName(), AnimAssets);
+	Assets.Append(AnimAssets);
 
 	TArray<TSharedPtr<FJsonValue>> BlueprintsWithErrors;
 	int32 TotalChecked = 0;
@@ -2164,6 +2206,225 @@ FString FMCPServer::HandleDeleteInterfaceFunction(const TSharedPtr<FJsonObject>&
 	return MakeResponse(true, Data);
 }
 
+FString FMCPServer::HandleModifyInterfaceFunctionParameter(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("interface_path")) ||
+		!Params->HasField(TEXT("function_name")) || !Params->HasField(TEXT("parameter_name")) ||
+		!Params->HasField(TEXT("new_type")))
+	{
+		return MakeError(TEXT("Missing required parameters: 'interface_path', 'function_name', 'parameter_name', 'new_type'"));
+	}
+
+	const FString InterfacePath = Params->GetStringField(TEXT("interface_path"));
+	const FString FunctionName = Params->GetStringField(TEXT("function_name"));
+	const FString ParameterName = Params->GetStringField(TEXT("parameter_name"));
+	const FString NewType = Params->GetStringField(TEXT("new_type"));
+	const bool bIsOutput = Params->HasField(TEXT("is_output")) ? Params->GetBoolField(TEXT("is_output")) : false;
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(InterfacePath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Interface not found: %s"), *InterfacePath));
+	}
+
+	if (Blueprint->BlueprintType != BPTYPE_Interface)
+	{
+		return MakeError(TEXT("Blueprint is not an interface"));
+	}
+
+	// Find the function graph
+	UEdGraph* FunctionGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph->GetName() == FunctionName)
+		{
+			FunctionGraph = Graph;
+			break;
+		}
+	}
+
+	if (!FunctionGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Function '%s' not found in interface"), *FunctionName));
+	}
+
+	// Parse the new type
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	FEdGraphPinType NewPinType;
+
+	// Handle common types
+	if (NewType == TEXT("int") || NewType == TEXT("int32"))
+	{
+		NewPinType.PinCategory = UEdGraphSchema_K2::PC_Int;
+	}
+	else if (NewType == TEXT("float") || NewType == TEXT("double"))
+	{
+		NewPinType.PinCategory = UEdGraphSchema_K2::PC_Real;
+		NewPinType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+	}
+	else if (NewType == TEXT("bool") || NewType == TEXT("boolean"))
+	{
+		NewPinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+	}
+	else if (NewType == TEXT("string") || NewType == TEXT("FString"))
+	{
+		NewPinType.PinCategory = UEdGraphSchema_K2::PC_String;
+	}
+	else if (NewType == TEXT("FVector"))
+	{
+		NewPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		NewPinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
+	}
+	else if (NewType == TEXT("FRotator"))
+	{
+		NewPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		NewPinType.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
+	}
+	else if (NewType == TEXT("FTransform"))
+	{
+		NewPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		NewPinType.PinSubCategoryObject = TBaseStructure<FTransform>::Get();
+	}
+	else
+	{
+		// Try to load as object type or struct
+		UObject* TypeObject = nullptr;
+		FString TypeNameToFind = NewType;
+
+		// Extract just the type name from /Script/ModuleName.TypeName format
+		if (NewType.StartsWith(TEXT("/Script/")))
+		{
+			FString PathWithoutScript = NewType.RightChop(8);
+			FString ModuleName;
+			PathWithoutScript.Split(TEXT("."), &ModuleName, &TypeNameToFind);
+		}
+
+		// Try to find the struct by iterating over all registered UScriptStruct objects
+		// This works even for C++ structs as long as they've been registered at startup
+		for (TObjectIterator<UScriptStruct> It; It; ++It)
+		{
+			UScriptStruct* Struct = *It;
+			if (Struct->GetName() == TypeNameToFind)
+			{
+				TypeObject = Struct;
+				break;
+			}
+		}
+
+		// If not found as struct, try classes
+		if (!TypeObject)
+		{
+			for (TObjectIterator<UClass> It; It; ++It)
+			{
+				UClass* Class = *It;
+				if (Class->GetName() == TypeNameToFind)
+				{
+					TypeObject = Class;
+					break;
+				}
+			}
+		}
+
+		// Fallback to standard FindObject/LoadObject with full path
+		if (!TypeObject)
+		{
+			TypeObject = FindObject<UObject>(nullptr, *NewType);
+		}
+		if (!TypeObject)
+		{
+			TypeObject = LoadObject<UObject>(nullptr, *NewType);
+		}
+
+		if (UClass* Class = Cast<UClass>(TypeObject))
+		{
+			NewPinType.PinCategory = UEdGraphSchema_K2::PC_Object;
+			NewPinType.PinSubCategoryObject = Class;
+		}
+		else if (UScriptStruct* Struct = Cast<UScriptStruct>(TypeObject))
+		{
+			NewPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+			NewPinType.PinSubCategoryObject = Struct;
+		}
+		else
+		{
+			return MakeError(FString::Printf(TEXT("Unknown type: %s. For C++ structs, ensure the struct has been used in the project (instantiated). C++ USTRUCT types may not be discoverable via reflection until they are actually used."), *NewType));
+		}
+	}
+
+	// Find the entry or result node based on whether it's input or output
+	UK2Node_EditablePinBase* TargetNode = nullptr;
+	for (UEdGraphNode* Node : FunctionGraph->Nodes)
+	{
+		if (bIsOutput)
+		{
+			UK2Node_FunctionResult* ResultNode = Cast<UK2Node_FunctionResult>(Node);
+			if (ResultNode)
+			{
+				TargetNode = ResultNode;
+				break;
+			}
+		}
+		else
+		{
+			UK2Node_FunctionEntry* EntryNode = Cast<UK2Node_FunctionEntry>(Node);
+			if (EntryNode)
+			{
+				TargetNode = EntryNode;
+				break;
+			}
+		}
+	}
+
+	if (!TargetNode)
+	{
+		return MakeError(TEXT("Could not find entry/result node in function graph"));
+	}
+
+	// Find the existing pin and remove it
+	bool bFoundPin = false;
+	TArray<TSharedPtr<FUserPinInfo>> PinsToKeep;
+
+	for (const TSharedPtr<FUserPinInfo>& PinInfo : TargetNode->UserDefinedPins)
+	{
+		if (PinInfo.IsValid() && PinInfo->PinName.ToString() == ParameterName)
+		{
+			bFoundPin = true;
+			// Create a new pin info with the new type
+			TSharedPtr<FUserPinInfo> NewPinInfo = MakeShared<FUserPinInfo>();
+			NewPinInfo->PinName = PinInfo->PinName;
+			NewPinInfo->PinType = NewPinType;
+			NewPinInfo->DesiredPinDirection = PinInfo->DesiredPinDirection;
+			PinsToKeep.Add(NewPinInfo);
+		}
+		else
+		{
+			PinsToKeep.Add(PinInfo);
+		}
+	}
+
+	if (!bFoundPin)
+	{
+		return MakeError(FString::Printf(TEXT("Parameter '%s' not found in function"), *ParameterName));
+	}
+
+	// Replace the user defined pins
+	TargetNode->UserDefinedPins = PinsToKeep;
+
+	// Reconstruct the node to reflect the changes
+	TargetNode->ReconstructNode();
+
+	// Mark the blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Interface function parameter modified successfully"));
+	Data->SetStringField(TEXT("function_name"), FunctionName);
+	Data->SetStringField(TEXT("parameter_name"), ParameterName);
+	Data->SetStringField(TEXT("new_type"), NewType);
+
+	return MakeResponse(true, Data);
+}
+
 FString FMCPServer::HandleDeleteFunctionGraph(const TSharedPtr<FJsonObject>& Params)
 {
 	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) || !Params->HasField(TEXT("function_name")))
@@ -3056,32 +3317,146 @@ FString FMCPServer::HandleClearAnimationBlueprintTags(const TSharedPtr<FJsonObje
 	TSharedPtr<FJsonObject> Data = MakeShareable(new FJsonObject);
 	int32 RemovedCount = 0;
 
-	// Find and remove AnimBlueprintExtension_Tag objects from the extensions array
+	// Find AnimBlueprintExtension_Tag objects
 	TArray<UBlueprintExtension*> ExtensionsToRemove;
+	TArray<FString> AllExtensions;
 
 	for (UBlueprintExtension* Extension : AnimBP->GetExtensions())
 	{
-		if (Extension && Extension->GetClass()->GetName().Contains(TEXT("AnimBlueprintExtension_Tag")))
+		if (Extension)
 		{
-			ExtensionsToRemove.Add(Extension);
+			FString ClassName = Extension->GetClass()->GetName();
+			AllExtensions.Add(ClassName);
+			if (ClassName.Contains(TEXT("Tag")))
+			{
+				ExtensionsToRemove.Add(Extension);
+			}
 		}
 	}
 
-	// Remove the extensions
+	// Output all extension names for debugging
+	TArray<TSharedPtr<FJsonValue>> ExtArray;
+	for (const FString& ExtName : AllExtensions)
+	{
+		ExtArray.Add(MakeShared<FJsonValueString>(ExtName));
+	}
+	Data->SetArrayField(TEXT("all_extensions"), ExtArray);
+	Data->SetNumberField(TEXT("tag_extensions_found"), ExtensionsToRemove.Num());
+
+	// Instead of removing the extension (which causes crashes),
+	// we'll try multiple approaches to clear tag references
+	TArray<FString> FoundProperties;
+
 	for (UBlueprintExtension* Extension : ExtensionsToRemove)
 	{
-		AnimBP->RemoveExtension(Extension);
-		RemovedCount++;
+		// Iterate all properties to find tag-related data
+		for (TFieldIterator<FProperty> PropIt(Extension->GetClass()); PropIt; ++PropIt)
+		{
+			FProperty* Prop = *PropIt;
+			FString PropInfo = FString::Printf(TEXT("%s (%s)"), *Prop->GetName(), *Prop->GetClass()->GetName());
+			FoundProperties.Add(PropInfo);
+
+			// Try map properties
+			if (FMapProperty* MapProp = CastField<FMapProperty>(Prop))
+			{
+				void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(Extension);
+				FScriptMapHelper MapHelper(MapProp, MapPtr);
+				int32 NumEntries = MapHelper.Num();
+				if (NumEntries > 0)
+				{
+					MapHelper.EmptyValues();
+					RemovedCount += NumEntries;
+				}
+			}
+			// Try array properties
+			else if (FArrayProperty* ArrayProp = CastField<FArrayProperty>(Prop))
+			{
+				void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(Extension);
+				FScriptArrayHelper ArrayHelper(ArrayProp, ArrayPtr);
+				int32 NumEntries = ArrayHelper.Num();
+				if (NumEntries > 0)
+				{
+					ArrayHelper.EmptyValues();
+					RemovedCount += NumEntries;
+				}
+			}
+			// Try struct properties - dig into them to find maps/arrays
+			else if (FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+			{
+				FoundProperties.Add(FString::Printf(TEXT("  -> Struct: %s"), *StructProp->Struct->GetName()));
+
+				// Get pointer to the struct data
+				void* StructPtr = StructProp->ContainerPtrToValuePtr<void>(Extension);
+
+				// Iterate properties inside the struct
+				for (TFieldIterator<FProperty> StructPropIt(StructProp->Struct); StructPropIt; ++StructPropIt)
+				{
+					FProperty* InnerProp = *StructPropIt;
+					FString InnerPropInfo = FString::Printf(TEXT("    -> %s (%s)"), *InnerProp->GetName(), *InnerProp->GetClass()->GetName());
+					FoundProperties.Add(InnerPropInfo);
+
+					// Check for maps inside struct
+					if (FMapProperty* InnerMapProp = CastField<FMapProperty>(InnerProp))
+					{
+						void* MapPtr = InnerMapProp->ContainerPtrToValuePtr<void>(StructPtr);
+						FScriptMapHelper MapHelper(InnerMapProp, MapPtr);
+						int32 NumEntries = MapHelper.Num();
+						FoundProperties.Add(FString::Printf(TEXT("      Map entries: %d"), NumEntries));
+						if (NumEntries > 0)
+						{
+							MapHelper.EmptyValues();
+							RemovedCount += NumEntries;
+						}
+					}
+					// Check for arrays inside struct
+					else if (FArrayProperty* InnerArrayProp = CastField<FArrayProperty>(InnerProp))
+					{
+						void* ArrayPtr = InnerArrayProp->ContainerPtrToValuePtr<void>(StructPtr);
+						FScriptArrayHelper ArrayHelper(InnerArrayProp, ArrayPtr);
+						int32 NumEntries = ArrayHelper.Num();
+						FoundProperties.Add(FString::Printf(TEXT("      Array entries: %d"), NumEntries));
+						if (NumEntries > 0)
+						{
+							ArrayHelper.EmptyValues();
+							RemovedCount += NumEntries;
+						}
+					}
+				}
+			}
+		}
 	}
+
+	// Store found properties for debugging
+	TArray<TSharedPtr<FJsonValue>> PropsArray;
+	for (const FString& PropInfo : FoundProperties)
+	{
+		PropsArray.Add(MakeShared<FJsonValueString>(PropInfo));
+	}
+	Data->SetArrayField(TEXT("found_properties"), PropsArray);
 
 	if (RemovedCount > 0)
 	{
 		AnimBP->MarkPackageDirty();
-		Data->SetStringField(TEXT("message"), TEXT("Extensions removed. Blueprint marked dirty. Compile manually in the editor."));
+
+		// Save immediately to persist changes before any compilation attempt
+		UPackage* Package = AnimBP->GetOutermost();
+		FString PackageFilename = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+		FSavePackageArgs SaveArgs;
+		SaveArgs.TopLevelFlags = RF_Standalone;
+		bool bSaved = UPackage::SavePackage(Package, AnimBP, *PackageFilename, SaveArgs);
+
+		if (bSaved)
+		{
+			Data->SetStringField(TEXT("message"), TEXT("Tag mappings cleared and saved. Restart the editor to reload cleanly."));
+		}
+		else
+		{
+			Data->SetStringField(TEXT("message"), TEXT("Tag mappings cleared but save failed. Try saving manually."));
+		}
 	}
 	else
 	{
-		Data->SetStringField(TEXT("message"), TEXT("No AnimBlueprintExtension_Tag objects found."));
+		Data->SetStringField(TEXT("message"), TEXT("No tag mappings found to clear."));
 	}
 
 	Data->SetNumberField(TEXT("removed_count"), RemovedCount);
