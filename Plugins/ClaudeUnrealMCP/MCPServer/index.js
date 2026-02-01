@@ -110,6 +110,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "check_all_blueprints",
+        description: "Compile all blueprints and return a list of those with errors or warnings. Useful for finding broken blueprints after code changes.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Filter by path prefix (e.g., /Game/Blueprints). Defaults to /Game/",
+            },
+            include_warnings: {
+              type: "boolean",
+              description: "Include blueprints with warnings (not just errors). Default: false",
+            },
+          },
+        },
+      },
+      {
         name: "read_blueprint",
         description: "Get overview of a blueprint (name, parent class, counts)",
         inputSchema: {

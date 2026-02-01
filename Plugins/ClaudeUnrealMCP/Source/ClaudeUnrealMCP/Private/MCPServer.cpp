@@ -252,6 +252,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleListBlueprints(Params);
 	}
+	else if (Command == TEXT("check_all_blueprints"))
+	{
+		return HandleCheckAllBlueprints(Params);
+	}
 	else if (Command == TEXT("read_blueprint"))
 	{
 		return HandleReadBlueprint(Params);
@@ -476,6 +480,106 @@ FString FMCPServer::HandleListBlueprints(const TSharedPtr<FJsonObject>& Params)
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetArrayField(TEXT("blueprints"), BlueprintArray);
 	Data->SetNumberField(TEXT("count"), BlueprintArray.Num());
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleCheckAllBlueprints(const TSharedPtr<FJsonObject>& Params)
+{
+	FString PathFilter = TEXT("/Game/");
+	if (Params.IsValid() && Params->HasField(TEXT("path")))
+	{
+		PathFilter = Params->GetStringField(TEXT("path"));
+	}
+
+	bool bIncludeWarnings = false;
+	if (Params.IsValid() && Params->HasField(TEXT("include_warnings")))
+	{
+		bIncludeWarnings = Params->GetBoolField(TEXT("include_warnings"));
+	}
+
+	FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+
+	TArray<FAssetData> Assets;
+	AssetRegistry.Get().GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), Assets);
+
+	TArray<TSharedPtr<FJsonValue>> BlueprintsWithErrors;
+	int32 TotalChecked = 0;
+	int32 TotalErrors = 0;
+	int32 TotalWarnings = 0;
+
+	for (const FAssetData& Asset : Assets)
+	{
+		FString PackagePath = Asset.PackagePath.ToString();
+		if (!PackagePath.StartsWith(PathFilter))
+		{
+			continue;
+		}
+
+		FString BlueprintPath = Asset.GetObjectPathString();
+		UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *BlueprintPath);
+
+		if (!Blueprint)
+		{
+			continue;
+		}
+
+		TotalChecked++;
+
+		// Compile the blueprint
+		FCompilerResultsLog CompileLog;
+		FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &CompileLog);
+
+		// Count errors and warnings
+		int32 ErrorCount = 0;
+		int32 WarningCount = 0;
+		TArray<TSharedPtr<FJsonValue>> ErrorsArray;
+		TArray<TSharedPtr<FJsonValue>> WarningsArray;
+
+		for (const TSharedRef<FTokenizedMessage>& Message : CompileLog.Messages)
+		{
+			if (Message->GetSeverity() == EMessageSeverity::Error)
+			{
+				ErrorCount++;
+				TSharedPtr<FJsonObject> MsgObj = MakeShared<FJsonObject>();
+				MsgObj->SetStringField(TEXT("message"), Message->ToText().ToString());
+				ErrorsArray.Add(MakeShared<FJsonValueObject>(MsgObj));
+			}
+			else if (Message->GetSeverity() == EMessageSeverity::Warning)
+			{
+				WarningCount++;
+				TSharedPtr<FJsonObject> MsgObj = MakeShared<FJsonObject>();
+				MsgObj->SetStringField(TEXT("message"), Message->ToText().ToString());
+				WarningsArray.Add(MakeShared<FJsonValueObject>(MsgObj));
+			}
+		}
+
+		TotalErrors += ErrorCount;
+		TotalWarnings += WarningCount;
+
+		// Only include blueprints with errors (or warnings if requested)
+		if (ErrorCount > 0 || (bIncludeWarnings && WarningCount > 0))
+		{
+			TSharedPtr<FJsonObject> BPObj = MakeShared<FJsonObject>();
+			BPObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
+			BPObj->SetStringField(TEXT("path"), BlueprintPath);
+			BPObj->SetNumberField(TEXT("error_count"), ErrorCount);
+			BPObj->SetNumberField(TEXT("warning_count"), WarningCount);
+			BPObj->SetArrayField(TEXT("errors"), ErrorsArray);
+			if (bIncludeWarnings)
+			{
+				BPObj->SetArrayField(TEXT("warnings"), WarningsArray);
+			}
+			BlueprintsWithErrors.Add(MakeShared<FJsonValueObject>(BPObj));
+		}
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetNumberField(TEXT("total_checked"), TotalChecked);
+	Data->SetNumberField(TEXT("total_errors"), TotalErrors);
+	Data->SetNumberField(TEXT("total_warnings"), TotalWarnings);
+	Data->SetNumberField(TEXT("blueprints_with_issues"), BlueprintsWithErrors.Num());
+	Data->SetArrayField(TEXT("blueprints"), BlueprintsWithErrors);
 
 	return MakeResponse(true, Data);
 }

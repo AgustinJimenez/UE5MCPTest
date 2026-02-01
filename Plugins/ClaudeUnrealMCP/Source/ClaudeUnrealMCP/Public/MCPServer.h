@@ -22,6 +22,7 @@ private:
 
 	// Blueprint reading commands
 	FString HandleListBlueprints(const TSharedPtr<FJsonObject>& Params);
+	FString HandleCheckAllBlueprints(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadBlueprint(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadVariables(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadClassDefaults(const TSharedPtr<FJsonObject>& Params);
