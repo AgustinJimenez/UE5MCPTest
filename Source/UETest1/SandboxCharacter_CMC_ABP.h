@@ -4,6 +4,7 @@
 #include "Animation/AnimInstance.h"
 #include "PoseSearch/PoseSearchTrajectoryTypes.h"
 #include "LocomotionEnums.h"
+#include "LocomotionStructs.h"
 #include "SandboxCharacter_CMC_ABP.generated.h"
 
 // Forward declarations
@@ -253,9 +254,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
 	E_MovementDirectionBias MovementDirectionBias = E_MovementDirectionBias::LeftFootForward;
 
-	// TODO: Convert S_MovementDirectionThresholds struct to C++
-	// UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-	// struct FS_MovementDirectionThresholds MovementDirectionThresholds;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	FMovementDirectionThresholds MovementDirectionThresholds;
 
 	// Target rotation
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rotation")
