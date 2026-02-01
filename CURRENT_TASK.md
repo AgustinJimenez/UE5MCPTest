@@ -33,20 +33,21 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 - ✅ **GM_Sandbox** - CyclePawn/CycleVisualOverride moved to C++, event graph cleared (0 errors)
 - ✅ **BP_MovementMode_Walking** - Full smooth walking reimplementation (workaround for USmoothWalkingMode linker error)
 - ✅ **BP_MovementMode_Slide** - Inherits from Walking with slide-specific defaults
+- ✅ **CameraDirector_SandboxCharacter** - Override GetWorld() workaround for unexported method
+- ✅ **Auto-Reconstruct LevelVisuals** - MCP plugin auto-refreshes block colors on ANY blueprint compile
 
-### Known Issue - Level Visuals Not Applied After Reparenting
-**Symptom:** Blocks appear yellowish/orange, no purple fog, lighting looks wrong after reparenting LevelVisuals/LevelBlock to C++.
+### ✅ RESOLVED - Level Visuals Auto-Reconstruct (2026-02-01)
+**Previous Issue:** Blocks appeared gray/yellow after blueprint compilation because LevelVisuals materials weren't being refreshed.
 
-**Root Cause:** C++ constructor defaults and OnConstruction initialization don't automatically apply to existing level instances. The `UpdateLevelVisuals()` function needs to be called to apply the LevelStyles colors to all LevelBlock actors.
+**Solution Implemented:**
+1. **Auto-reconstruct on ANY blueprint compile** - MCP plugin registers `OnBlueprintCompiled` callback that automatically reconstructs LevelVisuals actors
+2. **Fallback StyleIndex** - `UpdateLevelVisuals()` now falls back to StyleIndex 0 if saved value is invalid
+3. **Works for both editor and MCP compiles** - No manual intervention needed
 
-**Solution (choose one):**
-1. **Use MCP `reconstruct_actor` command** - `reconstruct_actor({ actor_name: "LevelVisuals_C_6" })`
-2. **Press Play** in the editor - triggers BeginPlay which calls UpdateLevelVisuals()
-3. **Move the LevelVisuals actor** in the viewport - triggers OnConstruction
-
-**MCP Enhancements (2026-02-01):**
+**MCP Enhancements:**
 - Added `reconstruct_actor` command - explicitly triggers `RerunConstructionScripts()` on any actor
-- Added `RerunConstructionScripts()` call to `set_actor_properties` - properties + reconstruction in one call
+- Added `ReconstructLevelVisuals()` helper called after `compile_blueprint`, `save_all`, `reparent_blueprint`
+- Module startup registers `GEditor->OnBlueprintCompiled()` callback (deferred via `OnPostEngineInit`)
 
 ---
 
