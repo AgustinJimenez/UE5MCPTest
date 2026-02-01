@@ -4,6 +4,33 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 
 ---
 
+## CURRENT STATUS SUMMARY (2026-02-01)
+
+**All 108 blueprints compile with 0 errors.**
+
+### Work Completed
+- ✅ 40+ blueprints converted to C++ (AnimNotifies, teleporters, characters, smart objects, controllers, etc.)
+- ✅ MCP tools for interface modification: `list_structs`, `modify_interface_function_parameter`
+- ✅ MCP tools for property preservation: `read_actor_properties`, `set_actor_properties`
+- ✅ C++ structs registered in UETest1 module startup for MCP discovery
+
+### Work Remaining (by category)
+
+| Category | Count | Status |
+|----------|-------|--------|
+| **Need Re-Reparenting** (Content reset) | 3 | LevelBlock, LevelVisuals, LevelButton - C++ classes exist, need reparent + property restore |
+| **Need Function Graphs Moved to C++** | 1 | GM_Sandbox - has CyclePawn/CycleVisualOverride in Blueprint |
+| **Cannot Convert** (Blueprint-only bases) | ~15 | MovementModes (SmoothWalkingMode), CameraDirector, StateTree tasks, AnimModifiers |
+| **Too Complex** (100K+ char graphs) | ~5 | AC_TraversalLogic, STT_FindSmartObject, AC_SmartObjectAnimation |
+| **Already Have C++ Parents** | ~25 | Blueprint instances configuring C++ classes |
+
+### Quick Actions Available
+1. **LevelVisuals** - Reparent to ALevelVisuals + restore properties (property data saved above)
+2. **LevelBlock** - Reparent to ALevelBlock + restore ~33 instances
+3. **LevelButton** - Reparent to ALevelButton
+
+---
+
 ## ✅ SUCCESSFUL CONVERSION - LevelBlock & LevelVisuals (2026-02-01)
 
 **Blueprints Converted:**
