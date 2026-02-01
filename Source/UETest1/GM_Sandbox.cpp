@@ -1,5 +1,6 @@
 #include "GM_Sandbox.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "GameFramework/PlayerController.h"
 
 AGM_Sandbox::AGM_Sandbox()
@@ -60,4 +61,38 @@ void AGM_Sandbox::ResetAllPlayers()
 			}
 		}
 	}
+}
+
+void AGM_Sandbox::CyclePawn()
+{
+	// Get current value of DDCvar.PawnClass
+	const int32 CurrentIndex = UKismetSystemLibrary::GetConsoleVariableIntValue(TEXT("DDCvar.PawnClass"));
+
+	// Calculate next index with wrapping
+	int32 NextIndex = 0;
+	if (PawnClasses.Num() > 0)
+	{
+		NextIndex = (CurrentIndex + 1) % PawnClasses.Num();
+	}
+
+	// Execute console command to set new value
+	const FString Command = FString::Printf(TEXT("DDCvar.PawnClass %d"), NextIndex);
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, Command, nullptr);
+}
+
+void AGM_Sandbox::CycleVisualOverride()
+{
+	// Get current value of DDCvar.VisualOverride
+	const int32 CurrentIndex = UKismetSystemLibrary::GetConsoleVariableIntValue(TEXT("DDCvar.VisualOverride"));
+
+	// Calculate next index with wrapping
+	int32 NextIndex = 0;
+	if (VisualOverrides.Num() > 0)
+	{
+		NextIndex = (CurrentIndex + 1) % VisualOverrides.Num();
+	}
+
+	// Execute console command to set new value
+	const FString Command = FString::Printf(TEXT("DDCvar.VisualOverride %d"), NextIndex);
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, Command, nullptr);
 }

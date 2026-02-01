@@ -23,6 +23,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Sandbox")
 	void ResetAllPlayers();
 
+	// Cycle to the next pawn class (wraps around, sets DDCvar.PawnClass)
+	UFUNCTION(BlueprintCallable, Category = "Sandbox")
+	void CyclePawn();
+
+	// Cycle to the next visual override (wraps around, sets DDCvar.VisualOverride)
+	UFUNCTION(BlueprintCallable, Category = "Sandbox")
+	void CycleVisualOverride();
+
 protected:
 	virtual void BeginPlay() override;
 

@@ -18,7 +18,7 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 
 | Category | Count | Status |
 |----------|-------|--------|
-| **Need Function Graphs Moved to C++** | 1 | GM_Sandbox - has CyclePawn/CycleVisualOverride in Blueprint |
+| **Need Function Graphs Moved to C++** | 0 | ✅ All done |
 | **Cannot Convert** (Blueprint-only bases) | ~15 | MovementModes (SmoothWalkingMode), CameraDirector, StateTree tasks, AnimModifiers |
 | **Too Complex** (100K+ char graphs) | ~5 | AC_TraversalLogic, STT_FindSmartObject, AC_SmartObjectAnimation |
 | **Already Have C++ Parents** | ~25 | Blueprint instances configuring C++ classes |
@@ -27,7 +27,8 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 - ✅ **LevelVisuals** - Reparented to ALevelVisuals, properties restored
 - ✅ **LevelBlock** - Reparented to ALevelBlock (33 instances)
 - ✅ **LevelButton** - Reparented to ALevelButton
-- ✅ **MCP Fix** - Added `RerunConstructionScripts()` call to `set_actor_properties` (requires UE restart)
+- ✅ **MCP Fix** - Added `RerunConstructionScripts()` call to `set_actor_properties` and new `reconstruct_actor` command
+- ✅ **GM_Sandbox** - CyclePawn/CycleVisualOverride moved to C++, event graph cleared (0 errors)
 
 ### Known Issue - Level Visuals Not Applied After Reparenting
 **Symptom:** Blocks appear yellowish/orange, no purple fog, lighting looks wrong after reparenting LevelVisuals/LevelBlock to C++.
