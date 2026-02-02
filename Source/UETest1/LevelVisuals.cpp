@@ -30,10 +30,72 @@ void ALevelVisuals::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// Initialize LevelStyles if empty or invalid
-	if (LevelStyles.Num() == 0 || !LevelStyles[0].BlockColors.Contains(TEXT("Floor")))
+	// Initialize LevelStyles if not exactly 3 styles or invalid
+	if (LevelStyles.Num() != 3 || !LevelStyles[0].BlockColors.Contains(TEXT("Floor")))
 	{
 		LevelStyles.Empty();
+
+		// Style 0 (Purple/white fog, dark gray blocks)
+		FS_LevelStyle Style0;
+		Style0.FogColor = FLinearColor(0.791667f, 0.750000f, 1.0f);
+		Style0.FogDensity = 0.02;
+		Style0.DecalColor = FLinearColor(1.0f, 0.5f, 0.0f, 0.4f);
+
+		FS_GridMaterialParams Floor0;
+		Floor0.GridColor = FLinearColor(0.5f, 0.5f, 0.5f);
+		Floor0.SurfaceColor = FLinearColor(0.258463f, 0.236978f, 0.541667f);
+		Floor0.GridSizes = FVector(100.0, 200.0, 800.0);
+		Floor0.Specularity = 0.5;
+
+		FS_GridMaterialParams Blocks0;
+		Blocks0.GridColor = FLinearColor(0.177083f, 0.177083f, 0.177083f);
+		Blocks0.SurfaceColor = FLinearColor(0.510417f, 0.510417f, 0.510417f);
+		Blocks0.GridSizes = FVector(100.0, 100.0, 10.0);
+		Blocks0.Specularity = 0.5;
+
+		FS_GridMaterialParams Traversable0;
+		Traversable0.GridColor = FLinearColor(0.7f, 0.7f, 0.7f);
+		Traversable0.SurfaceColor = FLinearColor(0.850000f, 0.264066f, 0.132812f);
+		Traversable0.GridSizes = FVector(100.0, 100.0, 10.0);
+		Traversable0.Specularity = 0.5;
+
+		Style0.BlockColors.Add(TEXT("Floor"), Floor0);
+		Style0.BlockColors.Add(TEXT("Blocks"), Blocks0);
+		Style0.BlockColors.Add(TEXT("Blocks_Traversable"), Traversable0);
+		Style0.BlockColors.Add(TEXT("Orange"), Blocks0);
+
+		LevelStyles.Add(Style0);
+
+		// Style 1 (Blue fog, black decal, gray blocks)
+		FS_LevelStyle Style1;
+		Style1.FogColor = FLinearColor(0.484375f, 0.655383f, 1.0f);
+		Style1.FogDensity = 0.02;
+		Style1.DecalColor = FLinearColor(0.0f, 0.0f, 0.0f, 0.4f);
+
+		FS_GridMaterialParams Floor1;
+		Floor1.GridColor = FLinearColor(0.5f, 0.5f, 0.5f);
+		Floor1.SurfaceColor = FLinearColor(0.258463f, 0.236978f, 0.541667f);
+		Floor1.GridSizes = FVector(100.0, 200.0, 800.0);
+		Floor1.Specularity = 0.5;
+
+		FS_GridMaterialParams Blocks1;
+		Blocks1.GridColor = FLinearColor(0.177083f, 0.177083f, 0.177083f);
+		Blocks1.SurfaceColor = FLinearColor(0.510417f, 0.510417f, 0.510417f);
+		Blocks1.GridSizes = FVector(100.0, 100.0, 10.0);
+		Blocks1.Specularity = 0.5;
+
+		FS_GridMaterialParams Traversable1;
+		Traversable1.GridColor = FLinearColor(0.7f, 0.7f, 0.7f);
+		Traversable1.SurfaceColor = FLinearColor(0.850000f, 0.264066f, 0.132812f);
+		Traversable1.GridSizes = FVector(100.0, 100.0, 10.0);
+		Traversable1.Specularity = 0.5;
+
+		Style1.BlockColors.Add(TEXT("Floor"), Floor1);
+		Style1.BlockColors.Add(TEXT("Blocks"), Blocks1);
+		Style1.BlockColors.Add(TEXT("Blocks_Traversable"), Traversable1);
+		Style1.BlockColors.Add(TEXT("Orange"), Blocks1);
+
+		LevelStyles.Add(Style1);
 
 		// Style 2 (Purple fog, orange decal) - matches original default
 		FS_LevelStyle Style2;
@@ -41,28 +103,28 @@ void ALevelVisuals::OnConstruction(const FTransform& Transform)
 		Style2.FogDensity = 0.02;
 		Style2.DecalColor = FLinearColor(1.0f, 0.5f, 0.0f, 0.4f);
 
-		FS_GridMaterialParams FloorParams;
-		FloorParams.GridColor = FLinearColor(0.5f, 0.5f, 0.5f);
-		FloorParams.SurfaceColor = FLinearColor(0.258463f, 0.236978f, 0.541667f);
-		FloorParams.GridSizes = FVector(100.0, 200.0, 800.0);
-		FloorParams.Specularity = 0.5;
+		FS_GridMaterialParams Floor2;
+		Floor2.GridColor = FLinearColor(0.5f, 0.5f, 0.5f);
+		Floor2.SurfaceColor = FLinearColor(0.258463f, 0.236978f, 0.541667f);
+		Floor2.GridSizes = FVector(100.0, 200.0, 800.0);
+		Floor2.Specularity = 0.5;
 
-		FS_GridMaterialParams BlocksParams;
-		BlocksParams.GridColor = FLinearColor(0.177083f, 0.177083f, 0.177083f);
-		BlocksParams.SurfaceColor = FLinearColor(0.510417f, 0.510417f, 0.510417f);
-		BlocksParams.GridSizes = FVector(100.0, 100.0, 10.0);
-		BlocksParams.Specularity = 0.5;
+		FS_GridMaterialParams Blocks2;
+		Blocks2.GridColor = FLinearColor(0.177083f, 0.177083f, 0.177083f);
+		Blocks2.SurfaceColor = FLinearColor(0.510417f, 0.510417f, 0.510417f);
+		Blocks2.GridSizes = FVector(100.0, 100.0, 10.0);
+		Blocks2.Specularity = 0.5;
 
-		FS_GridMaterialParams TraversableParams;
-		TraversableParams.GridColor = FLinearColor(0.7f, 0.7f, 0.7f);
-		TraversableParams.SurfaceColor = FLinearColor(0.850000f, 0.264066f, 0.132812f);
-		TraversableParams.GridSizes = FVector(100.0, 100.0, 10.0);
-		TraversableParams.Specularity = 0.5;
+		FS_GridMaterialParams Traversable2;
+		Traversable2.GridColor = FLinearColor(0.7f, 0.7f, 0.7f);
+		Traversable2.SurfaceColor = FLinearColor(0.850000f, 0.264066f, 0.132812f);
+		Traversable2.GridSizes = FVector(100.0, 100.0, 10.0);
+		Traversable2.Specularity = 0.5;
 
-		Style2.BlockColors.Add(TEXT("Floor"), FloorParams);
-		Style2.BlockColors.Add(TEXT("Blocks"), BlocksParams);
-		Style2.BlockColors.Add(TEXT("Blocks_Traversable"), TraversableParams);
-		Style2.BlockColors.Add(TEXT("Orange"), BlocksParams);  // Fallback
+		Style2.BlockColors.Add(TEXT("Floor"), Floor2);
+		Style2.BlockColors.Add(TEXT("Blocks"), Blocks2);
+		Style2.BlockColors.Add(TEXT("Blocks_Traversable"), Traversable2);
+		Style2.BlockColors.Add(TEXT("Orange"), Blocks2);
 
 		LevelStyles.Add(Style2);
 	}
