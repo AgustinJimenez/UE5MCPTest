@@ -24,11 +24,26 @@ void ALevelButton::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// Cache components by name (set up in blueprint)
-	CachedDefaultSceneRoot = Cast<USceneComponent>(GetDefaultSubobjectByName(TEXT("DefaultSceneRoot")));
-	CachedName = Cast<UTextRenderComponent>(GetDefaultSubobjectByName(TEXT("Name")));
-	CachedTrigger = Cast<UBoxComponent>(GetDefaultSubobjectByName(TEXT("Trigger")));
-	CachedPlate = Cast<UStaticMeshComponent>(GetDefaultSubobjectByName(TEXT("Plate")));
+	// Cache components (works for both C++ and Blueprint-created components)
+	if (!CachedDefaultSceneRoot)
+	{
+		CachedDefaultSceneRoot = GetRootComponent();
+	}
+
+	if (!CachedName)
+	{
+		CachedName = FindComponentByClass<UTextRenderComponent>();
+	}
+
+	if (!CachedTrigger)
+	{
+		CachedTrigger = FindComponentByClass<UBoxComponent>();
+	}
+
+	if (!CachedPlate)
+	{
+		CachedPlate = FindComponentByClass<UStaticMeshComponent>();
+	}
 
 	UpdateName();
 	UpdateColor();
@@ -39,15 +54,52 @@ void ALevelButton::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Re-cache components if they weren't found in OnConstruction (Blueprint component timing issue)
+	if (!CachedDefaultSceneRoot)
+	{
+		CachedDefaultSceneRoot = GetRootComponent();
+	}
+
+	if (!CachedName)
+	{
+		CachedName = FindComponentByClass<UTextRenderComponent>();
+	}
+
+	if (!CachedTrigger)
+	{
+		CachedTrigger = FindComponentByClass<UBoxComponent>();
+	}
+
+	if (!CachedPlate)
+	{
+		CachedPlate = FindComponentByClass<UStaticMeshComponent>();
+	}
+
 	// Bind overlap event
 	if (CachedTrigger)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("LevelButton '%s': Trigger component found, binding overlap event"), *GetName());
 		CachedTrigger->OnComponentBeginOverlap.AddDynamic(this, &ALevelButton::OnTriggerBeginOverlap);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("LevelButton '%s': Trigger component STILL NULL after BeginPlay! Listing all components..."), *GetName());
+
+		// Debug: List all components to see what's available
+		TArray<UActorComponent*> Components;
+		GetComponents(Components);
+		for (UActorComponent* Comp : Components)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("  - Component: %s (Class: %s)"), *Comp->GetName(), *Comp->GetClass()->GetName());
+		}
 	}
 }
 
 void ALevelButton::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
+	// Debug: Print when button is triggered
+	UE_LOG(LogTemp, Warning, TEXT("LevelButton '%s' triggered by %s!"), *GetName(), *OtherActor->GetName());
+
 	// Do Once gate
 	if (!bDoOnceHasExecuted)
 	{
@@ -59,6 +111,7 @@ void ALevelButton::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponen
 		// If ExecuteConsoleCommand is true, execute console command
 		if (ExecuteConsoleCommand)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("  Executing console command: %s"), *ConsoleCommand);
 			UKismetSystemLibrary::ExecuteConsoleCommand(this, ConsoleCommand, nullptr);
 		}
 
