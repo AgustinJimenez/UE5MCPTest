@@ -3,6 +3,7 @@
 #include "Editor.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Engine/World.h"
 
 #define LOCTEXT_NAMESPACE "FClaudeUnrealMCPModule"
 
@@ -18,23 +19,31 @@ void FClaudeUnrealMCPModule::StartupModule()
 		UE_LOG(LogTemp, Error, TEXT("ClaudeUnrealMCP: Failed to start server"));
 	}
 
-	// Defer registration until editor is fully initialized
-	FCoreDelegates::OnPostEngineInit.AddLambda([this]()
-	{
-		if (GEditor)
+	// Use a ticker to defer registration until GEditor is available
+	// This is more reliable than OnPostEngineInit which may fire before editor modules load
+	TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([this](float DeltaTime) -> bool
 		{
-			OnBlueprintCompiledHandle = GEditor->OnBlueprintCompiled().AddRaw(this, &FClaudeUnrealMCPModule::OnBlueprintCompiled);
-			UE_LOG(LogTemp, Log, TEXT("ClaudeUnrealMCP: Registered blueprint compile callback"));
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("ClaudeUnrealMCP: GEditor not available, blueprint callback not registered"));
-		}
-	});
+			if (GEditor)
+			{
+				OnBlueprintCompiledHandle = GEditor->OnBlueprintCompiled().AddRaw(this, &FClaudeUnrealMCPModule::OnBlueprintCompiled);
+				UE_LOG(LogTemp, Log, TEXT("ClaudeUnrealMCP: Registered blueprint compile callback"));
+				return false; // Stop ticking
+			}
+			return true; // Keep ticking until GEditor is available
+		}),
+		0.1f // Check every 100ms
+	);
 }
 
 void FClaudeUnrealMCPModule::ShutdownModule()
 {
+	// Remove ticker if still active
+	if (TickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
+	}
+
 	// Unregister blueprint compilation callback
 	if (GEditor && OnBlueprintCompiledHandle.IsValid())
 	{
@@ -51,10 +60,16 @@ void FClaudeUnrealMCPModule::ShutdownModule()
 
 void FClaudeUnrealMCPModule::OnBlueprintCompiled()
 {
-	// Auto-reconstruct LevelVisuals to refresh material colors after any blueprint compile
+	// Defer reconstruction with a small delay to let blueprint compilation and reinstancing fully complete
+	// The callback fires during compilation, before all objects are ready
 	if (Server)
 	{
-		Server->ReconstructLevelVisuals();
+		FMCPServer* ServerPtr = Server;
+		FTimerHandle TimerHandle;
+		GEditor->GetTimerManager()->SetTimer(TimerHandle, [ServerPtr]()
+		{
+			ServerPtr->ReconstructLevelVisuals();
+		}, 0.2f, false); // 200ms delay
 	}
 }
 

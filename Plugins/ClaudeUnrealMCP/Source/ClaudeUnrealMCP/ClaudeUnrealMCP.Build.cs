@@ -25,7 +25,8 @@ public class ClaudeUnrealMCP : ModuleRules
 			"Json",
 			"JsonUtilities",
 			"EnhancedInput",
-			"InputCore"
+			"InputCore",
+			"UETest1"  // Game module for LevelVisuals access
 		});
 	}
 }

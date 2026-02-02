@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
+#include "Containers/Ticker.h"
 
 class FMCPServer;
 
@@ -16,4 +17,5 @@ private:
 
 	FMCPServer* Server = nullptr;
 	FDelegateHandle OnBlueprintCompiledHandle;
+	FTSTicker::FDelegateHandle TickerHandle;
 };
