@@ -52,8 +52,8 @@ void UBP_MovementMode_Walking::GenerateMove_Implementation(const FMoverTickStart
 	}
 
 	// Get common legacy settings for max speed
-	const UCommonLegacyMovementSettings* CommonLegacySettings = GetMoverComponent()->FindSharedSettings<UCommonLegacyMovementSettings>();
-	float MaxMoveSpeed = MaxSpeedOverride >= 0.0f ? MaxSpeedOverride : (CommonLegacySettings ? CommonLegacySettings->MaxSpeed : 600.0f);
+	const UCommonLegacyMovementSettings* LegacySettings = GetMoverComponent()->FindSharedSettings<UCommonLegacyMovementSettings>();
+	float MaxMoveSpeed = MaxSpeedOverride >= 0.0f ? MaxSpeedOverride : (LegacySettings ? LegacySettings->MaxSpeed : 600.0f);
 
 	// Remove vertical component but keep magnitude
 	float DesiredVelMag = DesiredVelocity.Length();

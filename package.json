@@ -5,6 +5,8 @@
     "open:ue": "open UETest1.uproject",
     "build:macos": "/Users/Shared/Epic\\ Games/UE_5.7/Engine/Build/BatchFiles/Mac/Build.sh -ModuleWithSuffix=UETest1,9050 UETest1Editor Mac Development -Project=\"$(pwd)/UETest1.uproject\" \"$(pwd)/UETest1.uproject\" -architecture=arm64 -IgnoreJunk",
     "restart:ue:macos": "osascript -e \"tell application \\\"UnrealEditor\\\" to quit\" && open UETest1.uproject && sleep 20",
-    "restart:ue:win": "powershell -Command \"Stop-Process -Name UnrealEditor -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Start-Process 'E:\\Epic Games\\UE_5.7\\Engine\\Binaries\\Win64\\UnrealEditor.exe' -ArgumentList 'E:\\repo\\unreal_engine\\UE5MCPTest\\UETest1.uproject'\""
+    "restart:ue:win": "powershell -Command \"Stop-Process -Name UnrealEditor -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Start-Process 'E:\\Epic Games\\UE_5.7\\Engine\\Binaries\\Win64\\UnrealEditor.exe' -ArgumentList 'E:\\repo\\unreal_engine\\UE5MCPTest\\UETest1.uproject'\"",
+    "clean:win": "powershell -Command \"Stop-Process -Name UnrealEditor -Force -ErrorAction SilentlyContinue; Remove-Item -Path .vs,Binaries,Intermediate,Saved -Recurse -Force -ErrorAction SilentlyContinue; Write-Host 'Cleaned build artifacts'\"",
+    "clean:macos": "rm -rf .vs Binaries Intermediate Saved && echo 'Cleaned build artifacts'"
   }
 }

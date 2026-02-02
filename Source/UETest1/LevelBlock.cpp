@@ -10,6 +10,7 @@
 #include "Engine/StaticMesh.h"
 #include "LevelVisuals.h"
 #include "EngineUtils.h"
+#include "Containers/Ticker.h"
 
 ALevelBlock::ALevelBlock()
 {
@@ -103,8 +104,8 @@ void ALevelBlock::OnConstruction(const FTransform& Transform)
 		}
 	}
 
-	// Create dynamic material instance
-	if (CachedStaticMesh)
+	// Create dynamic material instance (only if it doesn't exist yet)
+	if (CachedStaticMesh && !DynamicMaterial)
 	{
 		// Use BaseMaterial if set, otherwise use the existing material on the mesh
 		UMaterialInterface* MaterialToUse = BaseMaterial ? BaseMaterial.Get() : CachedStaticMesh->GetMaterial(0);
@@ -165,6 +166,38 @@ void ALevelBlock::OnConstruction(const FTransform& Transform)
 	if (RandomizeButton)
 	{
 		RandomizeButton->ButtonPressed.AddDynamic(this, &ALevelBlock::RandomizeOffset);
+	}
+
+	// Defer a second material update to next tick to handle construction order issues
+	// When LevelBlock compiles, all blocks construct but LevelVisuals doesn't, so we need
+	// to re-query LevelVisuals after all constructions complete
+	if (UseLevelVisualsColor)
+	{
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime)
+		{
+			if (IsValid(this))
+			{
+				UWorld* World = GetWorld();
+				if (World)
+				{
+					// Find LevelVisuals and re-apply colors
+					for (TActorIterator<ALevelVisuals> It(World); It; ++It)
+					{
+						ALevelVisuals* LevelVisualsActor = *It;
+						if (LevelVisualsActor && LevelVisualsActor->LevelStyles.IsValidIndex(LevelVisualsActor->StyleIndex))
+						{
+							const FS_LevelStyle& CurrentStyle = LevelVisualsActor->LevelStyles[LevelVisualsActor->StyleIndex];
+							if (const FS_GridMaterialParams* ColorParams = CurrentStyle.BlockColors.Find(ColorGroup))
+							{
+								UpdateMaterials(*ColorParams);
+							}
+							break;
+						}
+					}
+				}
+			}
+			return false; // Execute only once
+		}));
 	}
 }
 

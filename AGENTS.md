@@ -371,6 +371,71 @@ Investigation into why C++ structs can't be found via MCP tools revealed key ins
 
 **Alternative**: For complex animation blueprints, consider keeping blueprint AnimGraph intact and only converting EventGraph/function logic to C++, or wait for automated tools like NodeToCode to support UE 5.7+.
 
+### Actor Construction Dependencies and Material Updates (2026-02-02)
+
+**Problem**: When compiling LevelBlock blueprint in editor, materials toggled between correct colors (purple floor, orange blocks) and incorrect fallback colors (gray) on each compile.
+
+**Root Cause Analysis:**
+1. **OnConstruction execution order is undefined**: When multiple actors exist in a level, their `OnConstruction` calls happen in undefined order during blueprint compilation
+2. **Selective construction**: Compiling `LevelBlock` blueprint only triggers `OnConstruction` on LevelBlock instances, NOT on LevelVisuals actor
+3. **Material recreation**: Creating new `DynamicMaterialInstance` on every `OnConstruction` causes visual flashes
+4. **GetWorld() unreliable in OnConstruction**: Timer manager requires valid World, which may be null during editor construction
+
+**Failed Solutions Attempted:**
+- ❌ `GetWorld()->GetTimerManager().SetTimerForNextTick()` - GetWorld() returns nullptr in editor OnConstruction
+- ❌ Relying on LevelVisuals OnConstruction to update all blocks - doesn't run when only LevelBlock compiles
+
+**Working Solution (2-Part Fix):**
+
+**Part 1: Use FTSTicker for deferred updates**
+```cpp
+#include "Containers/Ticker.h"
+
+// In OnConstruction - defer update to next tick when World is guaranteed available
+FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime)
+{
+    if (IsValid(this) && GetWorld())
+    {
+        // Re-query LevelVisuals and update materials
+        for (TActorIterator<ALevelVisuals> It(GetWorld()); It; ++It)
+        {
+            // Apply correct colors from LevelVisuals
+        }
+    }
+    return false; // Execute only once
+}));
+```
+
+**Part 2: Don't recreate DynamicMaterialInstance**
+```cpp
+// WRONG - Creates new material every OnConstruction (causes visual flash)
+DynamicMaterial = CachedStaticMesh->CreateDynamicMaterialInstance(0, MaterialToUse);
+
+// CORRECT - Only create once, reuse and update parameters on subsequent constructions
+if (CachedStaticMesh && !DynamicMaterial)
+{
+    DynamicMaterial = CachedStaticMesh->CreateDynamicMaterialInstance(0, MaterialToUse);
+}
+```
+
+**Key Learnings:**
+1. **FTSTicker vs Timer Manager**: Use `FTSTicker::GetCoreTicker()` for editor-time deferred execution when `GetWorld()` might be null
+2. **OnConstruction isolation**: Only the compiled blueprint's instances run OnConstruction, not dependent actors
+3. **Material instance persistence**: Create `DynamicMaterialInstance` once, update parameters on subsequent constructions
+4. **BeginPlay vs OnConstruction**: BeginPlay guarantees all actors initialized but only runs at runtime, not during blueprint compilation
+5. **PostInitializeComponents**: Good for runtime inter-actor dependencies but doesn't run during editor blueprint compilation
+
+**When to use each lifecycle function:**
+- `Constructor`: Create default subobjects only, no game logic
+- `OnConstruction`: Editor + runtime, runs on property changes, placement, movement, blueprint compile
+- `PostInitializeComponents`: Runtime only, all components guaranteed initialized, good for component dependencies
+- `BeginPlay`: Runtime only, all level actors guaranteed spawned and initialized, best for cross-actor dependencies
+
+**Official Documentation:**
+- [Unreal Engine Actor Lifecycle](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-actor-lifecycle)
+- [ikrima's Actor Lifecycle Cheatsheet](https://ikrima.dev/ue4guide/gameplay-programming/actor-tick-lifecycle-flow/actor-tick-lifecycle-flow/)
+- [Using FTSTicker for Next Tick Deferral](https://georgy.dev/posts/settimerfornexttick/)
+
 ## MCP Enhancement Sprints (2026-02-01)
 
 **Background**: Research into other UE5 MCP projects (chongdashu/unreal-mcp, flopperam/unreal-engine-mcp, ChiR24/Unreal_mcp, ayeletstudioindia/unreal-analyzer-mcp) identified gaps in our MCP server capabilities. Key findings documented in `FEATURE_RESEARCH.md` and implementation plan in `IMPLEMENTATION_PLAN.md`.

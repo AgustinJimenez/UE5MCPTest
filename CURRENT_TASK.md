@@ -316,8 +316,8 @@ Step 3: Test Full Conversion Workflow
 - Save properties → Reparent → Restore properties → Verify visuals unchanged
 ```
 
-**SPRINT 3 - ENHANCED MCP SCENE INSPECTION TOOLS (2026-02-01):**
-- **Status**: ⏳ **PENDING TESTING** - Implementation complete, compilation successful
+**SPRINT 3 - ENHANCED MCP SCENE INSPECTION TOOLS (2026-02-02):**
+- **Status**: ✅ **COMPLETED** - Implementation complete, tested successfully
 - **Motivation**: Research into other Unreal Engine MCP projects revealed missing scene inspection capabilities that would improve debugging and conversion workflows
 - **Implemented Commands**:
   - `find_actors_by_name` - Search for actors using wildcard patterns (`*` and `?`) with optional class filtering
@@ -359,6 +359,19 @@ Step 3: Test get_scene_summary
 - **Debugging Material Issues**: Quickly inspect which actors have DynamicMaterial vs None
 - **Finding Specific Actors**: Search for actors by pattern instead of listing all 108+ actors
 - **Scene Analysis**: Get overview of level composition for documentation or debugging
+
+**Critical Bug Fixed - Material Toggle on Blueprint Compile:**
+- **Problem**: LevelBlock materials toggled between correct (purple/orange) and fallback (gray) colors on each blueprint compile
+- **Root Cause**: OnConstruction execution order undefined + DynamicMaterialInstance recreated every construction
+- **Solution Applied**:
+  1. Use `FTSTicker::GetCoreTicker()` for deferred updates (works when `GetWorld()` is null in editor)
+  2. Only create `DynamicMaterialInstance` once, reuse on subsequent OnConstruction calls
+  3. Add deferred self-update in LevelBlock to re-query LevelVisuals after all constructions complete
+- **Files Modified**:
+  - `Source/UETest1/LevelBlock.cpp` - Added FTSTicker deferred update, prevent material recreation
+  - `Source/UETest1/LevelVisuals.cpp` - Added FTSTicker deferred UpdateLevelVisuals call
+- **Testing**: ✅ Verified - Materials now stable on repeated blueprint compiles
+- **Documentation**: Full analysis and patterns documented in `AGENTS.md` under "Actor Construction Dependencies"
 
 ---
 

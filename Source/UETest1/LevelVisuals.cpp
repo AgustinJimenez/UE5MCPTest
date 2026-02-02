@@ -2,6 +2,7 @@
 #include "LevelBlock.h"
 #include "EngineUtils.h"
 #include "Landscape.h"
+#include "Containers/Ticker.h"
 
 ALevelVisuals::ALevelVisuals()
 {
@@ -74,7 +75,20 @@ void ALevelVisuals::OnConstruction(const FTransform& Transform)
 	CachedPostProcess = FindComponentByClass<UPostProcessComponent>();
 	CachedDecal = FindComponentByClass<UDecalComponent>();
 
+	// Update visuals - this will also refresh all LevelBlock actors in the level
+	// This ensures blocks get correct colors even if they constructed before LevelVisuals
 	UpdateLevelVisuals();
+
+	// Force a second update on next tick to catch any blocks that constructed before this actor
+	// Use FTSTicker instead of timer because GetWorld() can be null during OnConstruction in editor
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime)
+	{
+		if (IsValid(this))
+		{
+			UpdateLevelVisuals();
+		}
+		return false; // Return false to execute only once
+	}));
 }
 
 void ALevelVisuals::SetLevelStyle(int32 Index)
