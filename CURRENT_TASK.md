@@ -32,16 +32,24 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 
 Scanned all 120 blueprints to identify remaining easy conversions:
 
-**🎯 NEXT TARGET: SpinningArrow**
+**✅ SpinningArrow - COMPLETED**
 - Path: `/Game/Levels/LevelPrototyping/SpinningArrow`
-- Parent: `Actor` (Blueprint-only)
+- Parent: `Actor` → `ASpinningArrow` (C++ class)
 - Complexity: **TRIVIAL** - Only 9 nodes
 - Logic: Timeline-driven spinning/bobbing animation
   - BeginPlay → Play timeline (looping)
-  - Timeline with 2 float curves: Up/Down (bobbing), Yaw (rotation)
+  - Timeline with 2 float curves: Up/Down (bobbing 0→1→0), Yaw (rotation 0→360°)
   - Sets Spinner component relative transform: `Z = UpDownCurve * 25`, `Yaw = YawCurve`
-- **Estimated conversion time: 15-20 minutes**
-- **Status**: Ready to convert ⏭️
+- **Actual conversion time**: ~10 minutes
+- **Commit**: `9932de7` "Convert SpinningArrow blueprint to C++ (trivial timeline animation)"
+- **Result**: Blueprint reparented to C++, event graph cleared, compiles with 0 errors ✅
+
+**🎯 NEXT TARGET: TargetDummy**
+- Path: `/Game/Levels/LevelPrototyping/TargetDummy`
+- Complexity: **EASY** - 13 nodes
+- Logic: Overlap detection adds/removes self from SandboxCharacter_Mover's TargetableActors array
+- Estimated conversion time: 20-30 minutes
+- Status: Ready to convert ⏭️
 
 **Other Easy Candidates Identified:**
 - TargetDummy (13 nodes) - Overlap detection + array manipulation - Medium complexity
