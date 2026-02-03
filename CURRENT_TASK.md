@@ -4,7 +4,64 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 
 ---
 
-## CURRENT STATUS SUMMARY (2026-02-01)
+## CURRENT STATUS SUMMARY (2026-02-03)
+
+**All blueprints compile with 0 errors.**
+
+### Recent Work (2026-02-03)
+
+**✅ LevelVisuals Style 0 Fix - COMPLETED**
+- **Issue**: Dark button (Style 0) created light purple scene instead of dark atmosphere
+- **Root Cause**: Used Blueprint CDO values instead of level instance property overrides
+  - CDO FogColor: Light purple (0.79, 0.75, 1.0) ❌
+  - Level instance FogColor: Dark gray (0.261, 0.261, 0.302) ✅
+  - CDO FogDensity: 0.02 ❌ Level instance: 0.3 ✅
+- **Solution**: Copied DefaultLevel.umap from GameAnimationSample, read actual actor instance values
+- **Result**: Dark button now creates correct dark atmosphere ✅
+
+**✅ MCP Documentation - Blueprint CDO vs Level Instance Properties**
+- **Problem Discovered**: `read_class_defaults` reads Blueprint CDO, NOT level instance overrides in .umap files
+- **Documentation Added**:
+  - AGENTS.md: New "CRITICAL" section explaining the limitation
+  - index.js: Enhanced tool descriptions for both `read_class_defaults` and `read_actor_properties`
+  - MCPServer.cpp: Comprehensive code comments with examples and workflows
+- **Impact**: Future conversions will use correct level instance values instead of CDO defaults
+- **Commit**: `71e12c9` "Document critical MCP limitation: Blueprint CDO vs Level Instance properties"
+
+### Blueprint Conversion Scan (2026-02-03)
+
+Scanned all 120 blueprints to identify remaining easy conversions:
+
+**🎯 NEXT TARGET: SpinningArrow**
+- Path: `/Game/Levels/LevelPrototyping/SpinningArrow`
+- Parent: `Actor` (Blueprint-only)
+- Complexity: **TRIVIAL** - Only 9 nodes
+- Logic: Timeline-driven spinning/bobbing animation
+  - BeginPlay → Play timeline (looping)
+  - Timeline with 2 float curves: Up/Down (bobbing), Yaw (rotation)
+  - Sets Spinner component relative transform: `Z = UpDownCurve * 25`, `Yaw = YawCurve`
+- **Estimated conversion time: 15-20 minutes**
+- **Status**: Ready to convert ⏭️
+
+**Other Easy Candidates Identified:**
+- TargetDummy (13 nodes) - Overlap detection + array manipulation - Medium complexity
+- StillCam (20 nodes) - Camera follow + look-at logic - Medium complexity
+
+**Already Converted (Confirmed via scan):**
+- ✅ LevelBlock_Traversable → inherits from `LevelBlock_C`
+- ✅ BP_MovementTransition_FromSlide → `BaseMovementModeTransition`
+- ✅ BP_MovementTransition_ToSlide → `BaseMovementModeTransition`
+- ✅ BP_MovementMode_Falling → `FallingMode`
+
+**Skipping (Not worth converting):**
+- BFL_HelpfulFunctions - 686K chars, Blueprint Function Library with many functions
+- 16x AnimModifier blueprints (AM_*) - Editor-only tools, not gameplay critical
+- PoseSearch Channels (PSC_*) - Animation system configuration
+- MetaHuman blueprints - External content
+
+---
+
+## PREVIOUS STATUS SUMMARY (2026-02-01)
 
 **All 108 blueprints compile with 0 errors.**
 
@@ -1022,3 +1079,240 @@ Columns: Name | Path | Parent | Vars | Components | Graphs | Score
 | BP_Kellan | /Game/MetaHumans/Kellan/BP_Kellan.BP_Kellan | Actor | 8 | 13 | 1 | 23 |
 | SandboxCharacter_CMC | /Game/Blueprints/SandboxCharacter_CMC.SandboxCharacter_CMC | Character | 20 | 10 | 1 | 32 |
 | SandboxCharacter_Mover | /Game/Blueprints/SandboxCharacter_Mover.SandboxCharacter_Mover | Pawn | 19 | 15 | 1 | 36 |
+
+---
+
+## EMPTY BLUEPRINT WRAPPER AUDIT (2026-02-02)
+
+**Problem**: Some Blueprints use C++ parent classes but contain NO logic, variables, or components. They exist purely as wrappers, adding unnecessary indirection.
+
+**Investigation Results:**
+
+| Blueprint | Parent Class | Variables | Logic | Components | Status |
+|-----------|-------------|-----------|-------|------------|--------|
+| **BP_MovementMode_Falling** | `FallingMode` (C++) | 0 | Empty event graph | 0 | ✅ **EMPTY WRAPPER** |
+| **BP_MovementTransition_FromSlide** | `BaseMovementModeTransition` (C++) | 0 | Empty event graph | 0 | ✅ **EMPTY WRAPPER** |
+| **BP_MovementTransition_ToSlide** | `BaseMovementModeTransition` (C++) | 0 | Empty event graph | 0 | ✅ **EMPTY WRAPPER** |
+| **GM_Sandbox** | `GM_Sandbox` (C++) | 0 | Empty event graph | DefaultSceneRoot only | ✅ **EMPTY WRAPPER** |
+
+**References Found:**
+
+1. **BP_MovementMode_Falling**:
+   - Referenced by: `SandboxCharacter_Mover.uasset`
+
+2. **BP_MovementTransition_FromSlide** / **ToSlide**:
+   - Referenced by: `SandboxCharacter_Mover.uasset`, `BP_MovementMode_Walking.uasset`, `BP_MovementMode_Slide.uasset`
+
+3. **GM_Sandbox**:
+   - Referenced by: Level default GameMode (likely in Project Settings or map override)
+
+**Cleanup Plan:**
+
+1. ⏳ **Phase 1 - Read referencing assets** to understand how they're used
+2. ⏳ **Phase 2 - Update references** from Blueprint class to C++ class  
+3. ⏳ **Phase 3 - Delete empty Blueprint wrappers**
+4. ⏳ **Phase 4 - Test** to verify nothing broke
+
+**Why This Matters:**
+- Reduces project complexity  
+- Eliminates unnecessary BP compilation overhead
+- Makes dependencies clearer (direct C++ usage)
+- Follows "full C++ conversion" goal
+
+**Next Steps:** Proceed with Phase 1 - investigating how SandboxCharacter_Mover and MovementMode blueprints reference these wrappers.
+
+
+---
+
+**AUDIT CONCLUSION (2026-02-02):**
+
+After investigation, determined that these "empty" Blueprint wrappers **SHOULD BE KEPT** because:
+
+1. **Mover Plugin Architecture** - CharacterMoverComponent stores mode references internally, not easily modifiable via MCP
+2. **Auto-Discovery System** - Mover likely scans for Blueprint classes inheriting from movement modes
+3. **Minimal Overhead** - Empty BPs compile instantly and add negligible overhead
+4. **Risk vs Reward** - Deleting them could break CharacterMoverComponent configuration, requiring manual re-setup
+
+**Decision**: Leave empty BP wrappers in place. They serve as lightweight registration points for the Mover system.
+
+**Alternative Approach** for future: When creating NEW movement modes, define them directly in C++ and register with Mover system programmatically (if API supports it).
+
+---
+
+---
+
+## LevelVisuals Style Restoration & Fresh Project Comparison (2026-02-02)
+
+### Problem Discovery
+After LevelButton C++ conversion, buttons triggered successfully but style changes were not visible:
+- ✅ Fog color changes working
+- ❌ Block color changes not visible
+- ❌ Decal color changes not visible
+
+### Fresh Project Analysis
+Created fresh test project (**GameAnimationSample**) with same LevelVisuals setup. Screenshot comparison showed:
+- **Style 0**: Light purple/white fog with gray blocks
+- **Style 1**: Blue fog with very dark/black atmosphere and lighter gray blocks  
+- **Style 2**: Purple fog with **bright orange traversable blocks**
+
+**Key Finding**: Visual changes WERE working in fresh project, indicating C++ implementation issue in main project.
+
+### Root Cause Analysis
+
+**Working Project Data** (from ):
+Extracted exact BlockColors from working LevelVisuals Blueprint using MCP :
+
+# 0 "<stdin>"
+# 0 "<built-in>"
+# 0 "<command-line>"
+# 1 "<stdin>"
+
+**Issues Found in Main Project**:
+1. C++ initialization had incorrect BlockColors (all styles using same gray colors)
+2. Blueprint asset had stale LevelStyles data that prevented C++ reinit
+3. Material parameter updates didn'\''t force render state refresh
+
+### Fixes Applied
+
+**Fix 1: Corrected BlockColors in LevelVisuals.cpp**
+- Updated all 3 style initializations to match exact values from working project
+- Source: 
+
+**Fix 2: Forced Reinitialization**
+# 0 "<stdin>"
+# 0 "<built-in>"
+# 0 "<command-line>"
+# 1 "<stdin>"
+This overrides stale Blueprint data to apply correct C++ defaults.
+
+**Fix 3: Added Render State Refresh in LevelBlock.cpp**
+# 0 "<stdin>"
+# 0 "<built-in>"
+# 0 "<command-line>"
+# 1 "<stdin>"
+Source: 
+
+### Current Status (In Progress)
+
+**Working**:
+- ✅ Fog color changes between styles
+- ✅ Decal color changes (black in Style 1, orange in Styles 0/2)
+- ✅ UpdateMaterials called on all 61 blocks
+- ✅ Material parameters being set correctly
+
+**Testing**:
+- 🔄 Verifying all blocks visually update with render state refresh
+- 🔄 Confirming traversable blocks turn orange in Style 2
+- 🔄 Confirming blocks change to darker colors in Style 1
+
+### Files Modified
+-  - Corrected 3-style initialization
+-  - Added render state refresh
+-  - Will contain corrected styles after reinit
+
+### Reference Screenshot Location
+Fresh project with working styles: **E:\repo\unreal_engine\GameAnimationSample**
+Screenshot shared in conversation (2026-02-02) showing 3 distinct visual states - stored in conversation history only.
+
+
+---
+
+## LevelVisuals Style Restoration & Fresh Project Comparison (2026-02-02)
+
+### Problem Discovery
+After LevelButton C++ conversion, buttons triggered successfully but style changes were not visible:
+- ✅ Fog color changes working
+- ❌ Block color changes not visible
+- ❌ Decal color changes not visible
+
+### Fresh Project Analysis
+Created fresh test project (GameAnimationSample) with same LevelVisuals setup. Screenshot comparison showed:
+- Style 0: Light purple/white fog with gray blocks
+- Style 1: Blue fog with very dark/black atmosphere and lighter gray blocks  
+- Style 2: Purple fog with bright orange traversable blocks
+
+Key Finding: Visual changes WERE working in fresh project, indicating C++ implementation issue in main project.
+
+### Root Cause
+1. C++ initialization had incorrect BlockColors (all styles using same gray colors)
+2. Blueprint asset had stale LevelStyles data preventing C++ reinit
+3. Material parameter updates did not force render state refresh
+
+### Fixes Applied
+1. Corrected BlockColors in LevelVisuals.cpp to match working project values
+2. Forced reinitialization to override stale Blueprint data
+3. Added render state refresh (MarkRenderStateDirty + RecreateRenderState_Concurrent)
+
+### Files Modified
+- Source/UETest1/LevelVisuals.cpp - Corrected 3-style initialization
+- Source/UETest1/LevelBlock.cpp - Added render state refresh
+
+### Reference
+Fresh project location: E:\repo\unreal_engine\GameAnimationSample
+Screenshot showing working styles stored in conversation history (2026-02-02)
+
+
+---
+
+## Blueprint Reference Preservation Plan
+
+**Date**: 2026-02-02  
+**Objective**: Copy original working Blueprints from fresh project as reference files to prevent property loss during conversions
+
+### Fresh Project Location
+`E:\repo\unreal_engine\GameAnimationSample\Content\Levels\LevelPrototyping\`
+
+### Blueprint Files to Preserve
+
+#### Core Actor Blueprints (Already converted to C++)
+- [ ] LevelBlock.uasset → LevelBlock_ORIGINAL.uasset
+- [ ] LevelButton.uasset → LevelButton_ORIGINAL.uasset  
+- [ ] LevelVisuals.uasset → LevelVisuals_ORIGINAL.uasset
+
+#### Actor Blueprints (Not yet converted)
+- [ ] LevelBlock_Traversable.uasset → LevelBlock_Traversable_ORIGINAL.uasset
+- [ ] SpinningArrow.uasset → SpinningArrow_ORIGINAL.uasset
+- [ ] TargetDummy.uasset → TargetDummy_ORIGINAL.uasset
+- [ ] Teleporter_Destination.uasset → Teleporter_Destination_ORIGINAL.uasset
+- [ ] Teleporter_Level.uasset → Teleporter_Level_ORIGINAL.uasset
+- [ ] Teleporter_Sender.uasset → Teleporter_Sender_ORIGINAL.uasset
+
+### Copy Process
+For each Blueprint:
+1. Copy from GameAnimationSample to UE5MCPTest
+2. Rename with _ORIGINAL suffix
+3. Mark checkbox when complete
+4. These files serve as reference only - will not be used in levels
+
+
+### ✅ Completion Status (2026-02-02)
+All Blueprint reference files successfully copied from GameAnimationSample:
+
+✓ LevelBlock_ORIGINAL.uasset  
+✓ LevelButton_ORIGINAL.uasset  
+✓ LevelVisuals_ORIGINAL.uasset  
+✓ LevelBlock_Traversable_ORIGINAL.uasset  
+✓ SpinningArrow_ORIGINAL.uasset  
+✓ TargetDummy_ORIGINAL.uasset  
+✓ Teleporter_Destination_ORIGINAL.uasset  
+✓ Teleporter_Level_ORIGINAL.uasset  
+✓ Teleporter_Sender_ORIGINAL.uasset  
+
+**Total**: 9 reference Blueprints preserved  
+**Location**: `Content/Levels/LevelPrototyping/*_ORIGINAL.uasset`
+
+### Usage
+These files can be inspected anytime using:
+- MCP tools (read_blueprint, read_components, read_event_graph, etc.)
+- Unreal Editor Content Browser
+- Side-by-side comparison during future conversions
+
+They will NOT interfere with the C++ implementations since they're not placed in any levels.
+
+
+#### Blueprint Data Structs (Already converted to C++)
+- [x] S_GridMaterialParams.uasset → S_GridMaterialParams_ORIGINAL.uasset
+- [x] S_LevelStyle.uasset → S_LevelStyle_ORIGINAL.uasset
+
+**Updated Total**: 11 reference Blueprints preserved (9 actors + 2 structs)
+
