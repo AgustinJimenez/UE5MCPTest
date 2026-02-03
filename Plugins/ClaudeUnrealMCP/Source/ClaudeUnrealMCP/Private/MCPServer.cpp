@@ -368,6 +368,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleSetBlueprintCDOClassReference(Params);
 	}
+	else if (Command == TEXT("replace_component_map_value"))
+	{
+		return HandleReplaceComponentMapValue(Params);
+	}
 	else if (Command == TEXT("add_input_mapping"))
 	{
 		return HandleAddInputMapping(Params);
@@ -2116,6 +2120,162 @@ FString FMCPServer::HandleSetBlueprintCDOClassReference(const TSharedPtr<FJsonOb
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Class reference %s set successfully to %s"), *PropertyName, *ClassName));
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleReplaceComponentMapValue(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return MakeError(TEXT("Missing parameters"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString ComponentName = Params->GetStringField(TEXT("component_name"));
+	FString PropertyName = Params->GetStringField(TEXT("property_name"));
+	FString MapKey = Params->GetStringField(TEXT("map_key"));
+	FString TargetClassName = Params->GetStringField(TEXT("target_class"));
+
+	if (BlueprintPath.IsEmpty() || ComponentName.IsEmpty() || PropertyName.IsEmpty() || MapKey.IsEmpty() || TargetClassName.IsEmpty())
+	{
+		return MakeError(TEXT("Missing required parameters"));
+	}
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	if (!Blueprint->SimpleConstructionScript)
+	{
+		return MakeError(TEXT("Blueprint has no SimpleConstructionScript"));
+	}
+
+	// Find the component node
+	USCS_Node* TargetNode = nullptr;
+	for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+	{
+		if (Node && Node->GetVariableName().ToString() == ComponentName)
+		{
+			TargetNode = Node;
+			break;
+		}
+	}
+
+	if (!TargetNode || !TargetNode->ComponentTemplate)
+	{
+		return MakeError(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+	}
+
+	UObject* ComponentTemplate = TargetNode->ComponentTemplate;
+
+	// Find the map property
+	FMapProperty* MapProp = FindFProperty<FMapProperty>(ComponentTemplate->GetClass(), *PropertyName);
+	if (!MapProp)
+	{
+		return MakeError(FString::Printf(TEXT("Map property not found: %s"), *PropertyName));
+	}
+
+	// Get the map helper
+	void* MapPtr = MapProp->ContainerPtrToValuePtr<void>(ComponentTemplate);
+	FScriptMapHelper MapHelper(MapProp, MapPtr);
+
+	// Find the key in the map
+	int32 FoundIndex = INDEX_NONE;
+	FString KeyToFind = MapKey;
+
+	for (int32 i = 0; i < MapHelper.Num(); ++i)
+	{
+		if (!MapHelper.IsValidIndex(i)) continue;
+
+		// Get the key
+		void* KeyPtr = MapHelper.GetKeyPtr(i);
+		FString KeyStr;
+		MapProp->KeyProp->ExportTextItem_Direct(KeyStr, KeyPtr, nullptr, nullptr, PPF_None);
+
+		// Remove quotes if present
+		KeyStr = KeyStr.TrimQuotes();
+
+		if (KeyStr == KeyToFind)
+		{
+			FoundIndex = i;
+			break;
+		}
+	}
+
+	if (FoundIndex == INDEX_NONE)
+	{
+		return MakeError(FString::Printf(TEXT("Map key not found: %s"), *MapKey));
+	}
+
+	// Get the current value
+	void* ValuePtr = MapHelper.GetValuePtr(FoundIndex);
+	FObjectProperty* ValueProp = CastField<FObjectProperty>(MapProp->ValueProp);
+
+	if (!ValueProp)
+	{
+		return MakeError(TEXT("Map value is not an object property"));
+	}
+
+	UObject* CurrentValue = ValueProp->GetObjectPropertyValue(ValuePtr);
+	if (!CurrentValue)
+	{
+		return MakeError(TEXT("Current map value is null"));
+	}
+
+	// Find or load the target class
+	UClass* TargetClass = FindObject<UClass>(nullptr, *TargetClassName);
+	if (!TargetClass)
+	{
+		TargetClass = LoadObject<UClass>(nullptr, *TargetClassName);
+	}
+
+	if (!TargetClass)
+	{
+		return MakeError(FString::Printf(TEXT("Target class not found: %s"), *TargetClassName));
+	}
+
+	// Create a new instance of the target class
+	UObject* NewInstance = NewObject<UObject>(ComponentTemplate, TargetClass, NAME_None, RF_Transactional);
+	if (!NewInstance)
+	{
+		return MakeError(FString::Printf(TEXT("Failed to create instance of class: %s"), *TargetClassName));
+	}
+
+	// Copy properties from old instance to new instance if they're compatible
+	if (CurrentValue->GetClass()->IsChildOf(TargetClass) || TargetClass->IsChildOf(CurrentValue->GetClass()))
+	{
+		for (TFieldIterator<FProperty> PropIt(TargetClass); PropIt; ++PropIt)
+		{
+			FProperty* Property = *PropIt;
+			if (!Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible))
+			{
+				continue;
+			}
+
+			// Try to find matching property in source
+			FProperty* SourceProperty = CurrentValue->GetClass()->FindPropertyByName(Property->GetFName());
+			if (SourceProperty && SourceProperty->SameType(Property))
+			{
+				void* SourceValuePtr = SourceProperty->ContainerPtrToValuePtr<void>(CurrentValue);
+				void* DestValuePtr = Property->ContainerPtrToValuePtr<void>(NewInstance);
+				Property->CopyCompleteValue(DestValuePtr, SourceValuePtr);
+			}
+		}
+	}
+
+	// Replace the map value
+	ValueProp->SetObjectPropertyValue(ValuePtr, NewInstance);
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Replaced map entry '%s' with instance of %s"), *MapKey, *TargetClassName));
+	Data->SetStringField(TEXT("old_class"), CurrentValue->GetClass()->GetName());
+	Data->SetStringField(TEXT("new_class"), TargetClass->GetName());
 
 	return MakeResponse(true, Data);
 }

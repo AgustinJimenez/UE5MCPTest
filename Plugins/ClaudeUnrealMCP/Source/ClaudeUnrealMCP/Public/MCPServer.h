@@ -45,6 +45,7 @@ private:
 	FString HandleAddComponent(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSetComponentProperty(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSetBlueprintCDOClassReference(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReplaceComponentMapValue(const TSharedPtr<FJsonObject>& Params);
 	FString HandleAddInputMapping(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReparentBlueprint(const TSharedPtr<FJsonObject>& Params);
 	FString HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Params);

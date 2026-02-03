@@ -450,6 +450,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "replace_component_map_value",
+        description: "Replace an object instance in a component's map property with a new instance of a different class. Use this to replace blueprint movement mode instances with C++ class instances in the MovementModes map.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            component_name: {
+              type: "string",
+              description: "Name of the component to modify (e.g., CharacterMover)",
+            },
+            property_name: {
+              type: "string",
+              description: "Name of the map property (e.g., MovementModes)",
+            },
+            map_key: {
+              type: "string",
+              description: "The map key to modify (e.g., 'Falling', 'Walking')",
+            },
+            target_class: {
+              type: "string",
+              description: "Full path or name of the C++ class to instantiate (e.g., /Script/Mover.FallingMode or FallingMode)",
+            },
+          },
+          required: ["blueprint_path", "component_name", "property_name", "map_key", "target_class"],
+        },
+      },
+      {
         name: "add_input_mapping",
         description: "Add a key mapping to an input mapping context",
         inputSchema: {
