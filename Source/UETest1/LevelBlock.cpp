@@ -104,8 +104,8 @@ void ALevelBlock::OnConstruction(const FTransform& Transform)
 		}
 	}
 
-	// Create dynamic material instance (only if it doesn't exist yet)
-	if (CachedStaticMesh && !DynamicMaterial)
+	// Create dynamic material instance (recreate every construction to match Blueprint behavior)
+	if (CachedStaticMesh)
 	{
 		// Use BaseMaterial if set, otherwise use the existing material on the mesh
 		UMaterialInterface* MaterialToUse = BaseMaterial ? BaseMaterial.Get() : CachedStaticMesh->GetMaterial(0);
@@ -203,8 +203,21 @@ void ALevelBlock::OnConstruction(const FTransform& Transform)
 
 void ALevelBlock::UpdateMaterials(const FS_GridMaterialParams& Params)
 {
+	// Recreate DynamicMaterial to ensure fresh state (fixes material parameter caching issues)
+	if (CachedStaticMesh)
+	{
+		UMaterialInterface* MaterialToUse = BaseMaterial ? BaseMaterial.Get() : CachedStaticMesh->GetMaterial(0);
+		if (MaterialToUse)
+		{
+			DynamicMaterial = CachedStaticMesh->CreateDynamicMaterialInstance(0, MaterialToUse);
+		}
+	}
+
 	if (DynamicMaterial)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("LevelBlock '%s': Updating materials (SurfaceColor R=%.2f G=%.2f B=%.2f)"),
+			*GetName(), Params.SurfaceColor.R, Params.SurfaceColor.G, Params.SurfaceColor.B);
+
 		DynamicMaterial->SetVectorParameterValue(TEXT("Grid Color"), Params.GridColor);
 		DynamicMaterial->SetVectorParameterValue(TEXT("Surface Color"), Params.SurfaceColor);
 		DynamicMaterial->SetScalarParameterValue(TEXT("Grid 1 Size"), Params.GridSizes.X);
@@ -212,10 +225,21 @@ void ALevelBlock::UpdateMaterials(const FS_GridMaterialParams& Params)
 		DynamicMaterial->SetScalarParameterValue(TEXT("Grid 3 Size"), Params.GridSizes.Z);
 		DynamicMaterial->SetScalarParameterValue(TEXT("Base Specular"), Params.Specularity);
 
+		// Force render state update
+		if (CachedStaticMesh)
+		{
+			CachedStaticMesh->MarkRenderStateDirty();
+			CachedStaticMesh->RecreateRenderState_Concurrent();
+		}
+
 		if (CachedTextRender)
 		{
 			CachedTextRender->SetTextRenderColor(Params.GridColor.ToFColor(false));
 		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("LevelBlock '%s': DynamicMaterial is NULL in UpdateMaterials!"), *GetName());
 	}
 }
 
