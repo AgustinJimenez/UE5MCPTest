@@ -28,6 +28,7 @@ private:
 	FString HandleReadVariables(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadClassDefaults(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadComponents(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadComponentProperties(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadEventGraph(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadEventGraphDetailed(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadFunctionGraphs(const TSharedPtr<FJsonObject>& Params);

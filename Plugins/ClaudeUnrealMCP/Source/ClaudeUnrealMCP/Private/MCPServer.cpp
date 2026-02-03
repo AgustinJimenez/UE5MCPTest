@@ -273,6 +273,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleReadComponents(Params);
 	}
+	else if (Command == TEXT("read_component_properties"))
+	{
+		return HandleReadComponentProperties(Params);
+	}
 	else if (Command == TEXT("read_event_graph"))
 	{
 		return HandleReadEventGraph(Params);
@@ -893,6 +897,109 @@ FString FMCPServer::HandleReadComponents(const TSharedPtr<FJsonObject>& Params)
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetArrayField(TEXT("components"), CompArray);
 	Data->SetNumberField(TEXT("count"), CompArray.Num());
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleReadComponentProperties(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("path")) || !Params->HasField(TEXT("component_name")))
+	{
+		return MakeError(TEXT("Missing 'path' or 'component_name' parameter"));
+	}
+
+	FString Path = Params->GetStringField(TEXT("path"));
+	FString ComponentName = Params->GetStringField(TEXT("component_name"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(Path);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *Path));
+	}
+
+	if (!Blueprint->SimpleConstructionScript)
+	{
+		return MakeError(TEXT("Blueprint has no SimpleConstructionScript"));
+	}
+
+	// Find the component node
+	USCS_Node* TargetNode = nullptr;
+	for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+	{
+		if (Node && Node->GetVariableName().ToString() == ComponentName)
+		{
+			TargetNode = Node;
+			break;
+		}
+	}
+
+	if (!TargetNode || !TargetNode->ComponentTemplate)
+	{
+		return MakeError(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+	}
+
+	UObject* ComponentTemplate = TargetNode->ComponentTemplate;
+	UClass* ComponentClass = ComponentTemplate->GetClass();
+
+	TArray<TSharedPtr<FJsonValue>> PropsArray;
+
+	// Iterate through all properties
+	for (TFieldIterator<FProperty> PropIt(ComponentClass); PropIt; ++PropIt)
+	{
+		FProperty* Property = *PropIt;
+		if (!Property) continue;
+
+		// Skip properties that aren't editable
+		if (!Property->HasAnyPropertyFlags(CPF_Edit))
+		{
+			continue;
+		}
+
+		TSharedPtr<FJsonObject> PropObj = MakeShared<FJsonObject>();
+		PropObj->SetStringField(TEXT("name"), Property->GetName());
+		PropObj->SetStringField(TEXT("type"), Property->GetClass()->GetName());
+
+		// Get property category
+		FString Category = Property->GetMetaData(TEXT("Category"));
+		if (!Category.IsEmpty())
+		{
+			PropObj->SetStringField(TEXT("category"), Category);
+		}
+
+		// Get property value as string
+		void* ValuePtr = Property->ContainerPtrToValuePtr<void>(ComponentTemplate);
+		FString ValueStr;
+		Property->ExportTextItem_Direct(ValueStr, ValuePtr, nullptr, ComponentTemplate, PPF_None);
+		PropObj->SetStringField(TEXT("value"), ValueStr);
+
+		// For object/class properties, also export the object path
+		if (FObjectProperty* ObjProp = CastField<FObjectProperty>(Property))
+		{
+			UObject* ObjValue = ObjProp->GetObjectPropertyValue(ValuePtr);
+			if (ObjValue)
+			{
+				PropObj->SetStringField(TEXT("object_value"), ObjValue->GetPathName());
+				PropObj->SetStringField(TEXT("object_class"), ObjValue->GetClass()->GetName());
+			}
+		}
+		else if (FClassProperty* ClassProp = CastField<FClassProperty>(Property))
+		{
+			UClass* ClassValue = Cast<UClass>(ClassProp->GetObjectPropertyValue(ValuePtr));
+			if (ClassValue)
+			{
+				PropObj->SetStringField(TEXT("class_value"), ClassValue->GetPathName());
+				PropObj->SetStringField(TEXT("class_name"), ClassValue->GetName());
+			}
+		}
+
+		PropsArray.Add(MakeShared<FJsonValueObject>(PropObj));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetArrayField(TEXT("properties"), PropsArray);
+	Data->SetNumberField(TEXT("count"), PropsArray.Num());
+	Data->SetStringField(TEXT("component_name"), ComponentName);
+	Data->SetStringField(TEXT("component_class"), ComponentClass->GetName());
 
 	return MakeResponse(true, Data);
 }

@@ -183,6 +183,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "read_component_properties",
+        description: "Read all properties of a specific component in a blueprint's CDO (Class Default Object). Use this to inspect component configuration including class references, default values, and settings.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            component_name: {
+              type: "string",
+              description: "Name of the component to read properties from (e.g., CharacterMover, SkeletalMesh)",
+            },
+          },
+          required: ["path", "component_name"],
+        },
+      },
+      {
         name: "read_event_graph",
         description:
           "Read the event graph nodes and their connections from a blueprint",
