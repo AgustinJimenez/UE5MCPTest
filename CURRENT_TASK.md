@@ -44,16 +44,41 @@ Scanned all 120 blueprints to identify remaining easy conversions:
 - **Commit**: `9932de7` "Convert SpinningArrow blueprint to C++ (trivial timeline animation)"
 - **Result**: Blueprint reparented to C++, event graph cleared, compiles with 0 errors ✅
 
-**🎯 NEXT TARGET: TargetDummy**
+**✅ TargetDummy - COMPLETED**
 - Path: `/Game/Levels/LevelPrototyping/TargetDummy`
+- Parent: `Actor` → `ATargetDummy` (C++ class)
 - Complexity: **EASY** - 13 nodes
 - Logic: Overlap detection adds/removes self from SandboxCharacter_Mover's TargetableActors array
-- Estimated conversion time: 20-30 minutes
-- Status: Ready to convert ⏭️
+  - OnComponentBeginOverlap (Trigger) → Cast to SandboxCharacter_Mover → Add self to TargetableActors
+  - OnComponentEndOverlap (Trigger) → Cast to SandboxCharacter_Mover → Remove self from TargetableActors
+  - Uses reflection (FArrayProperty, FScriptArrayHelper) to access Blueprint array property
+- **Actual conversion time**: ~5 minutes
+- **Commit**: `c4c0ec4` "Convert TargetDummy blueprint to C++ (overlap detection + array manipulation)"
+- **Result**: Blueprint reparented to C++, event graph cleared, compiles with 0 errors ✅
 
-**Other Easy Candidates Identified:**
-- TargetDummy (13 nodes) - Overlap detection + array manipulation - Medium complexity
-- StillCam (20 nodes) - Camera follow + look-at logic - Medium complexity
+**✅ StillCam - COMPLETED**
+- Path: `/Game/Widgets/WidgetData/StillCam`
+- Parent: `Actor` → `AStillCam` (C++ class)
+- Complexity: **MEDIUM** - 20 nodes
+- Logic: Camera follow + look-at behavior in Tick
+  - LookAtTarget (bool) → Rotates camera to look at TargetActor using FindLookAtRotation
+  - FollowTarget (bool) → Moves camera by delta of target's movement (TargetLocation - LastTargetLocation)
+  - Updates LastTargetLocation each frame to track target movement
+- **Actual conversion time**: ~5 minutes
+- **Commit**: `9562620` "Convert StillCam blueprint to C++ (camera follow + look-at logic)"
+- **Result**: Blueprint reparented to C++, event graph cleared, compiles with 0 errors ✅
+
+**🎯 Three Easy Conversions Completed in One Session** (Total: ~20 minutes)
+- SpinningArrow (9 nodes) - Timeline animation
+- TargetDummy (13 nodes) - Overlap detection + array manipulation
+- StillCam (20 nodes) - Camera follow/look-at logic
+
+**No More Obvious Easy Conversions Remaining**
+- All simple actor blueprints with <30 nodes have been converted
+- Remaining blueprints are either:
+  - Already converted (C++ parents exist)
+  - Too complex (100K+ chars, complex graphs)
+  - Not worth converting (editor tools, external content)
 
 **Already Converted (Confirmed via scan):**
 - ✅ LevelBlock_Traversable → inherits from `LevelBlock_C`
