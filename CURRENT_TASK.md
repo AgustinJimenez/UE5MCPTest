@@ -4,7 +4,39 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 
 ---
 
-## CURRENT STATUS SUMMARY (2026-02-03 - Session 2)
+## CURRENT STATUS SUMMARY (2026-02-03 - Session 3)
+
+**All 110 blueprints compile with 0 errors. Play in Editor fully functional.**
+
+### Recent Work (2026-02-03 - Session 3)
+
+**✅ Empty Blueprint Wrapper Deletion - COMPLETED**
+- Deleted AC_VisualOverrideManager.uasset and AC_PreCMCTick.uasset (replaced with C++ class references in SandboxCharacter_CMC)
+- Deleted GM_Sandbox.uasset and PC_Sandbox.uasset (replaced with C++ classes)
+- Updated GM_Sandbox.cpp:
+  - Set PlayerControllerClass to C++ APC_Sandbox
+  - Load PawnClasses and VisualOverrides at runtime in BeginPlay (safer than ConstructorHelpers for complex BPs like BP_Kellan)
+  - Excluded BP_Kellan from VisualOverrides due to LiveLink plugin compatibility issues
+- Updated DefaultLevel WorldSettings to use C++ GM_Sandbox directly
+- Fixed GameAnimationWidget by removing 7 nodes that referenced deleted GM_Sandbox blueprint
+
+**✅ MCP Improvement - Widget Blueprint Detection**
+- Added UWidgetBlueprint to check_all_blueprints MCP command
+- Now checks 110 assets (was 107) including EditorUtilityWidgets and UMG widgets
+- Would have caught the GameAnimationWidget errors before testing
+
+**Key Learning:**
+- ConstructorHelpers::FClassFinder at static init time fails if referenced BP has broken dependencies (e.g., BP_Kellan with LiveLink issues)
+- Using LoadClass<>() at runtime in BeginPlay is safer for complex blueprints
+- Must do clean builds (`npm run clean:win`) to verify changes don't have hidden issues masked by cached data
+
+**Commits:**
+- `b4523b4` - Delete empty blueprint component wrappers after C++ replacement
+- `b0ec88e` - Replace GM_Sandbox and PC_Sandbox blueprints with C++ classes
+
+---
+
+## PREVIOUS STATUS SUMMARY (2026-02-03 - Session 2)
 
 **All 114 blueprints compile with 0 errors. Play in Editor fully functional.**
 
