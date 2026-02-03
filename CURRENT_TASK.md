@@ -73,6 +73,40 @@ Scanned all 120 blueprints to identify remaining easy conversions:
 - TargetDummy (13 nodes) - Overlap detection + array manipulation
 - StillCam (20 nodes) - Camera follow/look-at logic
 
+### Additional Small Conversions (< 10K chars) - 26 Found!
+
+**🎯 NEXT TARGETS: Teleporter Actors (3 blueprints)**
+
+1. **Teleporter_Level** - READY ⏭️
+   - Path: `/Game/Levels/LevelPrototyping/Teleporter_Level`
+   - Parent: `Actor`
+   - Size: ~9K chars
+   - Logic: Overlap detection → Execute console command for level travel
+
+2. **Teleporter_Sender** - READY ⏭️
+   - Path: `/Game/Levels/LevelPrototyping/Teleporter_Sender`
+   - Parent: `Actor`
+   - Size: ~6K chars
+   - Logic: Overlap detection → Teleport to destination actor
+
+3. **Teleporter_Destination** - READY ⏭️
+   - Path: `/Game/Levels/LevelPrototyping/Teleporter_Destination`
+   - Parent: `Actor`
+   - Size: Empty event graph
+   - Logic: Marker actor for teleport targets
+
+**Other Small Conversion Candidates (20 more):**
+- Display Characters (5): BP_UE4_Mannequin, BP_Echo, BP_Twinblast, BP_Manny, BP_Quinn
+- Simple Components (3): AC_FoleyEvents, AC_PreCMCTick, AC_VisualOverrideManager
+- Controllers/Modes (6): PC_Locomotor, GM_Locomotor, BP_Walker, AIC_NPC_SmartObject, etc.
+- Empty Movement Blueprints (3): Already have C++ parents
+
+**Too Complex (Skipped):**
+- ❌ AC_SmartObjectAnimation (111K), AC_TraversalLogic (125K)
+- ❌ SandboxCharacter_CMC (386K), SandboxCharacter_Mover (315K)
+- ❌ BFL_HelpfulFunctions (686K)
+- ❌ STT_FindSmartObject, STT_PlayAnimFromBestCost (State Tree tasks)
+
 **No More Obvious Easy Conversions Remaining**
 - All simple actor blueprints with <30 nodes have been converted
 - Remaining blueprints are either:
