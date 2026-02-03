@@ -489,6 +489,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleClearComponentMapValueArray(Params);
 	}
+	else if (Command == TEXT("replace_component_class"))
+	{
+		return HandleReplaceComponentClass(Params);
+	}
 
 	return MakeError(FString::Printf(TEXT("Unknown command: %s"), *Command));
 }
@@ -4945,6 +4949,114 @@ FString FMCPServer::HandleClearComponentMapValueArray(const TSharedPtr<FJsonObje
 	Data->SetStringField(TEXT("map_key"), MapKey);
 	Data->SetStringField(TEXT("array_property"), ArrayPropertyName);
 	Data->SetNumberField(TEXT("elements_cleared"), OldSize);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleReplaceComponentClass(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return MakeError(TEXT("Missing parameters"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString ComponentName = Params->GetStringField(TEXT("component_name"));
+	FString NewComponentClass = Params->GetStringField(TEXT("new_class"));
+
+	if (BlueprintPath.IsEmpty() || ComponentName.IsEmpty() || NewComponentClass.IsEmpty())
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path, component_name, or new_class"));
+	}
+
+	// Load the blueprint
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	if (!Blueprint->SimpleConstructionScript)
+	{
+		return MakeError(TEXT("Blueprint has no SimpleConstructionScript"));
+	}
+
+	// Find the component node
+	USCS_Node* ComponentNode = nullptr;
+	for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+	{
+		if (Node && Node->GetVariableName().ToString() == ComponentName)
+		{
+			ComponentNode = Node;
+			break;
+		}
+	}
+
+	if (!ComponentNode)
+	{
+		return MakeError(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+	}
+
+	// Find the new component class
+	UClass* NewClass = FindFirstObject<UClass>(*NewComponentClass, EFindFirstObjectOptions::ExactClass);
+	if (!NewClass)
+	{
+		// Try with _C suffix for blueprint classes
+		NewClass = FindFirstObject<UClass>(*(NewComponentClass + TEXT("_C")), EFindFirstObjectOptions::ExactClass);
+	}
+	if (!NewClass)
+	{
+		// Try loading as path
+		NewClass = LoadClass<UActorComponent>(nullptr, *NewComponentClass);
+	}
+	if (!NewClass)
+	{
+		return MakeError(FString::Printf(TEXT("Component class not found: %s"), *NewComponentClass));
+	}
+
+	// Verify it's an ActorComponent
+	if (!NewClass->IsChildOf(UActorComponent::StaticClass()))
+	{
+		return MakeError(FString::Printf(TEXT("Class is not an ActorComponent: %s"), *NewComponentClass));
+	}
+
+	FString OldClassName = ComponentNode->ComponentClass ? ComponentNode->ComponentClass->GetName() : TEXT("None");
+
+	// Mark for modification
+	Blueprint->Modify();
+	if (ComponentNode->ComponentTemplate)
+	{
+		ComponentNode->ComponentTemplate->Modify();
+	}
+
+	// Replace the component class
+	ComponentNode->ComponentClass = NewClass;
+
+	// Recreate the component template with the new class
+	if (ComponentNode->ComponentTemplate)
+	{
+		// Destroy old template
+		ComponentNode->ComponentTemplate = nullptr;
+	}
+
+	// Create new template
+	ComponentNode->ComponentTemplate = NewObject<UActorComponent>(
+		Blueprint->SimpleConstructionScript,
+		NewClass,
+		*ComponentName,
+		RF_ArchetypeObject | RF_Public | RF_Transactional
+	);
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	Blueprint->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Component class replaced successfully"));
+	Data->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+	Data->SetStringField(TEXT("component_name"), ComponentName);
+	Data->SetStringField(TEXT("old_class"), OldClassName);
+	Data->SetStringField(TEXT("new_class"), NewClass->GetName());
 
 	return MakeResponse(true, Data);
 }

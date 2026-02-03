@@ -1237,6 +1237,71 @@ After investigation, determined that these "empty" Blueprint wrappers **SHOULD B
 
 **Decision**: Leave empty BP wrappers in place. They serve as lightweight registration points for the Mover system.
 
+---
+
+## Session 4: Component Class Replacement & AC_VisualOverrideManager (2026-02-03)
+
+### Objective
+Replace AC_VisualOverrideManager blueprint component references with C++ class
+
+### Problem Encountered
+After successfully replacing movement mode instances in Session 3, found another empty blueprint wrapper:
+- **AC_VisualOverrideManager**: Empty blueprint with C++ parent, referenced as a component in both character blueprints
+- Components had class "AC_VisualOverrideManager_C" (blueprint) instead of "AC_VisualOverrideManager" (C++)
+
+**Key Difference from Session 3:**
+- Session 3: Replaced object instances **inside** a map property (movement modes in CharacterMover.MovementModes)
+- Session 4: Replace component **class reference** (component's class itself, not a property value)
+
+### Solution: New MCP Tool
+Created `replace_component_class` MCP command to replace component class references.
+
+**Implementation Details:**
+- Finds component node in SimpleConstructionScript
+- Replaces `ComponentNode->ComponentClass` with new class
+- Recreates `ComponentNode->ComponentTemplate` with new class type
+- Uses `FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified` to trigger recompilation
+
+**Files Modified:**
+- `Plugins/ClaudeUnrealMCP/Source/ClaudeUnrealMCP/Public/MCPServer.h` - Added HandleReplaceComponentClass declaration
+- `Plugins/ClaudeUnrealMCP/Source/ClaudeUnrealMCP/Private/MCPServer.cpp` - Implemented HandleReplaceComponentClass (~100 lines)
+- `Plugins/ClaudeUnrealMCP/MCPServer/index.js` - Added replace_component_class tool definition
+
+### Results
+- ✅ SandboxCharacter_Mover: AC_VisualOverrideManager component class replaced (AC_VisualOverrideManager_C → AC_VisualOverrideManager)
+- ✅ SandboxCharacter_CMC: BP_VisualOverrideManager component class replaced (AC_VisualOverrideManager_C → AC_VisualOverrideManager)
+- ✅ Both blueprints compile with 0 errors
+- ✅ All 111 blueprints compile with 0 errors
+- 🎯 **AC_VisualOverrideManager.uasset can now be safely deleted** (all references replaced with C++ class)
+
+### Key Learnings
+
+**MCP Tool Pattern for Component Manipulation:**
+1. **Map Value Replacement** (`replace_component_map_value`) - Replace object instances stored IN component properties
+2. **Array Element Replacement** (`replace_blueprint_array_value`) - Replace object instances in blueprint CDO arrays
+3. **Sub-object Property Modification** (`clear_component_map_value_array`) - Modify properties of sub-objects in maps
+4. **Component Class Replacement** (`replace_component_class`) - Replace the component's class itself
+
+**Component Architecture:**
+- Components are nodes in `SimpleConstructionScript` (SCS)
+- Each node has `ComponentClass` (the UClass*) and `ComponentTemplate` (the CDO instance)
+- Replacing a component's class requires recreating both
+
+### Session Workflow
+1. Identified empty blueprint wrapper (AC_VisualOverrideManager)
+2. Analyzed component references in character blueprints
+3. Created new MCP tool (replace_component_class)
+4. Compiled plugin and restarted Unreal Engine
+5. Reloaded MCP server to pick up new tool definition
+6. Replaced component classes in both blueprints
+7. Verified all blueprints compile successfully
+8. Saved all changes
+
+**Total Empty Blueprints Deleted This Sprint (Sessions 3-4):**
+- 3 blueprints deleted in Session 3 (movement modes & transitions)
+- 1 blueprint ready for deletion in Session 4 (AC_VisualOverrideManager)
+- **4 total empty wrappers eliminated**
+
 **Alternative Approach** for future: When creating NEW movement modes, define them directly in C++ and register with Mover system programmatically (if API supports it).
 
 ---

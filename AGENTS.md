@@ -214,6 +214,7 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 
 **Component Map Value Property Commands (Sprint 3 - 2026-02-03):**
 - `clear_component_map_value_array` - Clear an array property within an object stored in a component's map property. Use this to fix stale sub-object data (e.g., clearing Transitions arrays in movement mode instances stored in CharacterMover's MovementModes map after replacing blueprint transitions with C++ classes).
+- `replace_component_class` - Replace a component's class with a different class (e.g., replace blueprint component class with C++ class). Use this to convert blueprint component references to C++ classes without losing the component configuration. Recreates the component template with the new class.
 
 ### CRITICAL: Blueprint CDO vs Level Instance Properties
 

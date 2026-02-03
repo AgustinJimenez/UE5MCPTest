@@ -80,6 +80,7 @@ private:
 
 	// Component map value manipulation (Sprint 3)
 	FString HandleClearComponentMapValueArray(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReplaceComponentClass(const TSharedPtr<FJsonObject>& Params);
 
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));

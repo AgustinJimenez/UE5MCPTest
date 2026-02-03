@@ -1044,6 +1044,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["blueprint_path", "component_name", "map_property_name", "map_key", "array_property_name"],
         },
       },
+      {
+        name: "replace_component_class",
+        description: "Replace a component's class with a different class (e.g., replace blueprint component class with C++ class). Use this to convert blueprint component references to C++ classes without losing the component configuration.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            component_name: {
+              type: "string",
+              description: "Name of the component to replace (e.g., AC_VisualOverrideManager, BP_VisualOverrideManager)",
+            },
+            new_class: {
+              type: "string",
+              description: "Full name of the new component class (e.g., AC_VisualOverrideManager for C++ class, or full path for blueprint class)",
+            },
+          },
+          required: ["blueprint_path", "component_name", "new_class"],
+        },
+      },
     ],
   };
 });
