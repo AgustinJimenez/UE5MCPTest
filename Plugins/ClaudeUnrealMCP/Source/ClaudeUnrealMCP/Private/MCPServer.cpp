@@ -1,6 +1,7 @@
 #include "MCPServer.h"
 #include "Engine/Blueprint.h"
 #include "Animation/AnimBlueprint.h"
+#include "WidgetBlueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Blueprint/BlueprintExtension.h"
 #include "Engine/SimpleConstructionScript.h"
@@ -573,6 +574,11 @@ FString FMCPServer::HandleCheckAllBlueprints(const TSharedPtr<FJsonObject>& Para
 	TArray<FAssetData> AnimAssets;
 	AssetRegistry.Get().GetAssetsByClass(UAnimBlueprint::StaticClass()->GetClassPathName(), AnimAssets);
 	Assets.Append(AnimAssets);
+
+	// Also include Widget Blueprints (UMG widgets, EditorUtilityWidgets)
+	TArray<FAssetData> WidgetAssets;
+	AssetRegistry.Get().GetAssetsByClass(UWidgetBlueprint::StaticClass()->GetClassPathName(), WidgetAssets);
+	Assets.Append(WidgetAssets);
 
 	TArray<TSharedPtr<FJsonValue>> BlueprintsWithErrors;
 	int32 TotalChecked = 0;
