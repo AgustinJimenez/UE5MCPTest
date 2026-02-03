@@ -21,7 +21,7 @@ protected:
 	UPROPERTY(VisibleDefaultsOnly, Category = "AI")
 	TObjectPtr<UStateTreeAIComponent> StateTreeAI;
 
-	UPROPERTY(EditInstanceOnly, Category = "AI")
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "AI")
 	TMap<FString, double> Cooldowns;
 
 	UPROPERTY(EditDefaultsOnly, Category = "AI")
