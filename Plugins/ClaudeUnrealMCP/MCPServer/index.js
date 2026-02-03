@@ -406,6 +406,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "set_blueprint_cdo_class_reference",
+        description: "Set a class reference property on a component in a blueprint CDO (Class Default Object). Use this to change blueprint class references to C++ classes (e.g., change BP_MovementMode_Falling to FallingMode C++ class).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            component_name: {
+              type: "string",
+              description: "Name of the component to modify (e.g., CharacterMover)",
+            },
+            property_name: {
+              type: "string",
+              description: "Name of the class property to set (e.g., FallingModeClass)",
+            },
+            class_name: {
+              type: "string",
+              description: "Full path or name of the C++ class to reference (e.g., /Script/UETest1.FallingMode or FallingMode)",
+            },
+          },
+          required: ["blueprint_path", "component_name", "property_name", "class_name"],
+        },
+      },
+      {
         name: "add_input_mapping",
         description: "Add a key mapping to an input mapping context",
         inputSchema: {

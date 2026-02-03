@@ -360,6 +360,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleSetComponentProperty(Params);
 	}
+	else if (Command == TEXT("set_blueprint_cdo_class_reference"))
+	{
+		return HandleSetBlueprintCDOClassReference(Params);
+	}
 	else if (Command == TEXT("add_input_mapping"))
 	{
 		return HandleAddInputMapping(Params);
@@ -1890,6 +1894,121 @@ FString FMCPServer::HandleSetComponentProperty(const TSharedPtr<FJsonObject>& Pa
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Property %s set successfully"), *PropertyName));
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleSetBlueprintCDOClassReference(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return MakeError(TEXT("Missing parameters"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString ComponentName = Params->GetStringField(TEXT("component_name"));
+	FString PropertyName = Params->GetStringField(TEXT("property_name"));
+	FString ClassName = Params->GetStringField(TEXT("class_name"));
+
+	if (BlueprintPath.IsEmpty() || ComponentName.IsEmpty() || PropertyName.IsEmpty() || ClassName.IsEmpty())
+	{
+		return MakeError(TEXT("Missing required parameters"));
+	}
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	if (!Blueprint->SimpleConstructionScript)
+	{
+		return MakeError(TEXT("Blueprint has no SimpleConstructionScript"));
+	}
+
+	// Find the component node
+	USCS_Node* TargetNode = nullptr;
+	for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+	{
+		if (Node && Node->GetVariableName().ToString() == ComponentName)
+		{
+			TargetNode = Node;
+			break;
+		}
+	}
+
+	if (!TargetNode || !TargetNode->ComponentTemplate)
+	{
+		return MakeError(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+	}
+
+	UObject* ComponentTemplate = TargetNode->ComponentTemplate;
+
+	// Find the property
+	FProperty* Property = ComponentTemplate->GetClass()->FindPropertyByName(*PropertyName);
+	if (!Property)
+	{
+		return MakeError(FString::Printf(TEXT("Property not found: %s"), *PropertyName));
+	}
+
+	// Handle class properties (FClassProperty)
+	if (FClassProperty* ClassProp = CastField<FClassProperty>(Property))
+	{
+		// Try to find the class by name
+		UClass* TargetClass = FindObject<UClass>(nullptr, *ClassName);
+		if (!TargetClass)
+		{
+			// Try loading as a full path
+			TargetClass = LoadObject<UClass>(nullptr, *ClassName);
+		}
+
+		if (!TargetClass)
+		{
+			return MakeError(FString::Printf(TEXT("Class not found: %s"), *ClassName));
+		}
+
+		// Verify the class is compatible with the property's metaclass
+		if (!TargetClass->IsChildOf(ClassProp->MetaClass))
+		{
+			return MakeError(FString::Printf(TEXT("Class %s is not compatible with property metaclass %s"),
+				*TargetClass->GetName(), *ClassProp->MetaClass->GetName()));
+		}
+
+		// Set the class reference
+		ClassProp->SetObjectPropertyValue(ClassProp->ContainerPtrToValuePtr<void>(ComponentTemplate), TargetClass);
+	}
+	// Handle soft class properties (FSoftClassProperty)
+	else if (FSoftClassProperty* SoftClassProp = CastField<FSoftClassProperty>(Property))
+	{
+		// Try to find the class by name
+		UClass* TargetClass = FindObject<UClass>(nullptr, *ClassName);
+		if (!TargetClass)
+		{
+			// Try loading as a full path
+			TargetClass = LoadObject<UClass>(nullptr, *ClassName);
+		}
+
+		if (!TargetClass)
+		{
+			return MakeError(FString::Printf(TEXT("Class not found: %s"), *ClassName));
+		}
+
+		// Create a soft object ptr to the class
+		FSoftObjectPtr SoftPtr(TargetClass);
+		void* ValuePtr = SoftClassProp->ContainerPtrToValuePtr<void>(ComponentTemplate);
+		SoftClassProp->SetPropertyValue(ValuePtr, SoftPtr);
+	}
+	else
+	{
+		return MakeError(FString::Printf(TEXT("Property %s is not a class property (type: %s)"),
+			*PropertyName, *Property->GetClass()->GetName()));
+	}
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Class reference %s set successfully to %s"), *PropertyName, *ClassName));
 
 	return MakeResponse(true, Data);
 }
