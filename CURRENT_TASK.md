@@ -1306,6 +1306,116 @@ Created `replace_component_class` MCP command to replace component class referen
 
 ---
 
+## Session 4 Continued: Empty Blueprint Wrapper Audit (2026-02-03)
+
+### Objective
+Systematic search for additional empty blueprint wrappers that can be replaced with C++ classes
+
+### Empty Wrappers Found & Replaced
+
+#### ✅ Component Blueprints (Can use `replace_component_class`)
+1. **AC_VisualOverrideManager** - Replaced in Session 4 start
+   - Referenced by: SandboxCharacter_Mover, SandboxCharacter_CMC (as components)
+   - Status: ✅ Replaced with C++, ready for deletion
+
+2. **AC_PreCMCTick** - Replaced in Session 4 continued
+   - Parent: AC_PreCMCTick (C++)
+   - Variables: 1 (cast reference only)
+   - Event Graph: Empty (0 nodes)
+   - Function Graphs: Empty (0 graphs)
+   - Referenced by: SandboxCharacter_CMC (as component)
+   - Status: ✅ Replaced with C++, ready for deletion
+   - **Note**: Required node cleanup (refresh_nodes, break_orphaned_pins, remove_error_nodes)
+
+#### ⏳ Game Framework Blueprints (Require different MCP tools)
+3. **GM_Sandbox** (GameMode)
+   - Parent: GM_Sandbox (C++)
+   - Variables: 0
+   - Event Graph: Empty (0 nodes)
+   - Components: 1 (DefaultSceneRoot only)
+   - Referenced by: Level/Project settings (default GameMode)
+   - Status: ⏳ Empty wrapper, but requires new MCP feature
+   - **Blocker**: No MCP tool to replace GameMode in level/project settings
+
+4. **PC_Sandbox** (PlayerController)
+   - Parent: PC_Sandbox (C++)
+   - Variables: 1
+   - Event Graph: Empty (0 nodes)
+   - Function Graphs: Empty (only UserConstructionScript entry)
+   - Referenced by: GameMode settings (default PlayerController)
+   - Status: ⏳ Empty wrapper, but requires new MCP feature
+   - **Blocker**: No MCP tool to replace PlayerController in GameMode/project settings
+
+#### ⏳ Character Actor Blueprints (Different use case)
+5. **BP_Echo** (Character)
+   - Parent: BP_Echo (C++)
+   - Variables: 0
+   - Event Graph: Empty (0 nodes)
+   - Function Graphs: Empty (only UserConstructionScript entry)
+   - Components: 3 (visual setup only)
+   - Referenced by: Spawned in level (not used as component)
+   - Status: ⏳ Empty wrapper, but serves as visual configuration holder
+
+6. **BP_Manny** (Character)
+   - Parent: BP_Manny (C++)
+   - Variables: 0
+   - Event Graph: Empty (0 nodes)
+   - Function Graphs: Empty (only UserConstructionScript entry)
+   - Components: 2 (visual setup only)
+   - Status: ⏳ Empty wrapper, visual configuration holder
+
+7. **BP_Quinn** (Character)
+   - Parent: BP_Quinn (C++)
+   - Variables: 0
+   - Event Graph: Empty (0 nodes)
+   - Function Graphs: Empty (only UserConstructionScript entry)
+   - Components: 2 (visual setup only)
+   - Status: ⏳ Empty wrapper, visual configuration holder
+
+#### ❌ Component Blueprints with Logic (NOT empty)
+- **AC_SmartObjectAnimation** - Event graph: 111,328 chars (has logic)
+- **AC_TraversalLogic** - Event graph: 125,254 chars (has logic)
+
+### Session Results
+- ✅ **2 component blueprints** successfully replaced with C++ (AC_VisualOverrideManager, AC_PreCMCTick)
+- ✅ All 111 blueprints compile with 0 errors
+- ✅ **5 additional empty wrappers** identified (GM_Sandbox, PC_Sandbox, BP_Echo, BP_Manny, BP_Quinn)
+- **Total ready for deletion: 2** (AC_VisualOverrideManager, AC_PreCMCTick)
+
+### Potential Future MCP Features
+
+**Priority 1: Game Framework Class Replacement**
+```
+read_project_settings - Read default GameMode, PlayerController, etc. from project settings
+set_project_settings - Update default GameMode, PlayerController, etc. in project settings
+read_level_gamemode - Read level-specific GameMode override from world settings
+set_level_gamemode - Update level-specific GameMode override in world settings
+```
+
+**Use Case**: Replace GM_Sandbox and PC_Sandbox blueprint wrappers with C++ classes
+
+**Priority 2: Level Actor Spawning**
+Character blueprints (BP_Echo, BP_Manny, BP_Quinn) are spawned in levels and serve primarily as component configuration holders. These are lower priority for conversion since:
+- They provide visual configuration (mesh, materials, etc.)
+- Minimal overhead (no logic)
+- Replacing would require updating all level instances that spawn them
+
+### Key Learnings
+
+**Component Class Replacement Pattern:**
+1. Use `replace_component_class` to change component's class
+2. Run `refresh_nodes` to update stale node references
+3. Run `break_orphaned_pins` to clean up orphaned pins
+4. Run `remove_error_nodes` to automatically remove nodes with type mismatches
+5. Verify compilation successful
+
+**Empty Wrapper Categories:**
+1. **Component Blueprints** - Use `replace_component_class` ✅
+2. **Game Framework Classes** - Need new MCP tools (project/level settings) ⏳
+3. **Actor Configuration Holders** - Low priority (serve valid purpose) ⏳
+
+---
+
 ---
 
 ## LevelVisuals Style Restoration & Fresh Project Comparison (2026-02-02)
