@@ -372,6 +372,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleReplaceComponentMapValue(Params);
 	}
+	else if (Command == TEXT("replace_blueprint_array_value"))
+	{
+		return HandleReplaceBlueprintArrayValue(Params);
+	}
 	else if (Command == TEXT("add_input_mapping"))
 	{
 		return HandleAddInputMapping(Params);
@@ -2274,6 +2278,128 @@ FString FMCPServer::HandleReplaceComponentMapValue(const TSharedPtr<FJsonObject>
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Replaced map entry '%s' with instance of %s"), *MapKey, *TargetClassName));
+	Data->SetStringField(TEXT("old_class"), CurrentValue->GetClass()->GetName());
+	Data->SetStringField(TEXT("new_class"), TargetClass->GetName());
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleReplaceBlueprintArrayValue(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return MakeError(TEXT("Missing parameters"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString PropertyName = Params->GetStringField(TEXT("property_name"));
+	int32 ArrayIndex = Params->GetIntegerField(TEXT("array_index"));
+	FString TargetClassName = Params->GetStringField(TEXT("target_class"));
+
+	if (BlueprintPath.IsEmpty() || PropertyName.IsEmpty() || TargetClassName.IsEmpty())
+	{
+		return MakeError(TEXT("Missing required parameters"));
+	}
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	UClass* GeneratedClass = Blueprint->GeneratedClass;
+	if (!GeneratedClass)
+	{
+		return MakeError(TEXT("Blueprint has no generated class"));
+	}
+
+	UObject* CDO = GeneratedClass->GetDefaultObject();
+	if (!CDO)
+	{
+		return MakeError(TEXT("Could not get Class Default Object"));
+	}
+
+	// Find the array property
+	FArrayProperty* ArrayProp = FindFProperty<FArrayProperty>(CDO->GetClass(), *PropertyName);
+	if (!ArrayProp)
+	{
+		return MakeError(FString::Printf(TEXT("Array property not found: %s"), *PropertyName));
+	}
+
+	// Get the array helper
+	void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(CDO);
+	FScriptArrayHelper ArrayHelper(ArrayProp, ArrayPtr);
+
+	// Check array bounds
+	if (ArrayIndex < 0 || ArrayIndex >= ArrayHelper.Num())
+	{
+		return MakeError(FString::Printf(TEXT("Array index %d out of bounds (array size: %d)"), ArrayIndex, ArrayHelper.Num()));
+	}
+
+	// Get the element property
+	FObjectProperty* ElementProp = CastField<FObjectProperty>(ArrayProp->Inner);
+	if (!ElementProp)
+	{
+		return MakeError(TEXT("Array element is not an object property"));
+	}
+
+	// Get current value
+	void* ElementPtr = ArrayHelper.GetRawPtr(ArrayIndex);
+	UObject* CurrentValue = ElementProp->GetObjectPropertyValue(ElementPtr);
+	if (!CurrentValue)
+	{
+		return MakeError(TEXT("Current array element is null"));
+	}
+
+	// Find or load the target class
+	UClass* TargetClass = FindObject<UClass>(nullptr, *TargetClassName);
+	if (!TargetClass)
+	{
+		TargetClass = LoadObject<UClass>(nullptr, *TargetClassName);
+	}
+
+	if (!TargetClass)
+	{
+		return MakeError(FString::Printf(TEXT("Target class not found: %s"), *TargetClassName));
+	}
+
+	// Create a new instance of the target class
+	UObject* NewInstance = NewObject<UObject>(CDO, TargetClass, NAME_None, RF_Transactional | RF_ArchetypeObject | RF_Public);
+	if (!NewInstance)
+	{
+		return MakeError(FString::Printf(TEXT("Failed to create instance of class: %s"), *TargetClassName));
+	}
+
+	// Copy properties from old instance to new instance if they're compatible
+	if (CurrentValue->GetClass()->IsChildOf(TargetClass) || TargetClass->IsChildOf(CurrentValue->GetClass()))
+	{
+		for (TFieldIterator<FProperty> PropIt(TargetClass); PropIt; ++PropIt)
+		{
+			FProperty* Property = *PropIt;
+			if (!Property->HasAnyPropertyFlags(CPF_Edit | CPF_BlueprintVisible))
+			{
+				continue;
+			}
+
+			// Try to find matching property in source
+			FProperty* SourceProperty = CurrentValue->GetClass()->FindPropertyByName(Property->GetFName());
+			if (SourceProperty && SourceProperty->SameType(Property))
+			{
+				void* SourceValuePtr = SourceProperty->ContainerPtrToValuePtr<void>(CurrentValue);
+				void* DestValuePtr = Property->ContainerPtrToValuePtr<void>(NewInstance);
+				Property->CopyCompleteValue(DestValuePtr, SourceValuePtr);
+			}
+		}
+	}
+
+	// Replace the array element
+	ElementProp->SetObjectPropertyValue(ElementPtr, NewInstance);
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Replaced array[%d] with instance of %s"), ArrayIndex, *TargetClassName));
 	Data->SetStringField(TEXT("old_class"), CurrentValue->GetClass()->GetName());
 	Data->SetStringField(TEXT("new_class"), TargetClass->GetName());
 

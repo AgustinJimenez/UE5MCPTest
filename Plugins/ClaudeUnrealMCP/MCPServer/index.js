@@ -480,6 +480,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "replace_blueprint_array_value",
+        description: "Replace an object instance in a blueprint CDO's array property with a new instance of a different class. Use this to replace blueprint transition instances with C++ class instances in the Transitions array.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            property_name: {
+              type: "string",
+              description: "Name of the array property (e.g., Transitions)",
+            },
+            array_index: {
+              type: "integer",
+              description: "Index of the array element to replace (0-based)",
+            },
+            target_class: {
+              type: "string",
+              description: "Full path or name of the C++ class to instantiate (e.g., /Script/Mover.BaseMovementModeTransition or BaseMovementModeTransition)",
+            },
+          },
+          required: ["blueprint_path", "property_name", "array_index", "target_class"],
+        },
+      },
+      {
         name: "add_input_mapping",
         description: "Add a key mapping to an input mapping context",
         inputSchema: {
