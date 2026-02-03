@@ -156,7 +156,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "read_class_defaults",
-        description: "Read class default object (CDO) properties from a blueprint, including inherited properties like Default Pawn Class from GameMode",
+        description: "Read Blueprint Class Default Object (CDO) properties, including inherited properties. IMPORTANT: This reads class defaults from the Blueprint asset (.uasset), NOT level instance property overrides. For actual working values from a placed actor, use read_actor_properties instead. CDO values are often placeholder/first-iteration values and may not match actual gameplay behavior.",
         inputSchema: {
           type: "object",
           properties: {
@@ -870,7 +870,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "read_actor_properties",
-        description: "Read all EditAnywhere properties from a level actor instance. Use this to preserve actor configuration before blueprint reparenting.",
+        description: "Read all EditAnywhere properties from a level actor instance, including property overrides set in the Details panel. This returns ACTUAL working values from the level file (.umap), not Blueprint class defaults. Use this to: (1) Preserve actor configuration before blueprint reparenting, (2) Get correct reference values from a working project, (3) Read actual gameplay-tested property values. When copying reference data from another project, copy the level file (.umap) and use this command instead of read_class_defaults.",
         inputSchema: {
           type: "object",
           properties: {

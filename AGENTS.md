@@ -211,6 +211,57 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 - `set_actor_properties` - Set EditAnywhere properties on a level actor instance. Accepts JSON object with property name-value pairs (as returned by read_actor_properties). Does NOT trigger reconstruction - use `reconstruct_actor` separately if needed.
 - `reconstruct_actor` - Trigger OnConstruction on a level actor by calling `RerunConstructionScripts()`. Use this after reparenting blueprints to C++ to apply C++ initialization logic (e.g., UpdateLevelVisuals, UpdateMaterials) to existing level instances that weren't automatically updated.
 
+### CRITICAL: Blueprint CDO vs Level Instance Properties
+
+**⚠️ IMPORTANT LIMITATION** discovered 2026-02-03: The MCP `read_class_defaults` command reads Blueprint Class Default Object (CDO) values, NOT level instance property overrides.
+
+**The Problem:**
+When you place a Blueprint actor in a level and modify its properties in the Details panel, those property values are stored in the **level file (.umap)**, not in the Blueprint asset file (.uasset). This means:
+
+- ❌ `read_class_defaults` on a Blueprint asset → Returns **class default values** (often incorrect for working behavior)
+- ✅ `read_actor_properties` on a level instance → Returns **actual overridden values** used in the level
+
+**Example - LevelStyles Visual Bug:**
+When converting LevelVisuals blueprint to C++, reading the _ORIGINAL.uasset blueprint showed:
+- FogColor = Light purple (0.79, 0.75, 1.0) ❌ Wrong - from Blueprint CDO
+- FogDensity = 0.02 ❌ Wrong - from Blueprint CDO
+
+But reading the actual LevelVisuals actor instance from DefaultLevel.umap showed:
+- FogColor = Dark gray (0.261, 0.261, 0.302) ✅ Correct - level instance override
+- FogDensity = 0.3 ✅ Correct - level instance override
+
+**Solution Workflow:**
+When copying reference data from a working project (e.g., GameAnimationSample):
+
+1. **Copy the level file (.umap)** from the working project, not just Blueprint assets
+2. **Open the level** in Unreal Editor
+3. **Use `read_actor_properties`** to read the actual actor instance values
+4. **Use those values** in your C++ implementation
+
+```javascript
+// WRONG - Reads Blueprint CDO
+const cdo = await read_class_defaults({
+  path: "/Game/Blueprints/LevelVisuals_ORIGINAL"
+});
+
+// CORRECT - Reads level instance with property overrides
+const instance = await read_actor_properties({
+  actor_name: "LevelVisuals_C_6"
+});
+```
+
+**Why This Matters:**
+- Blueprint class defaults are often placeholder values or "first iteration" values
+- The actual working behavior comes from level instance property overrides
+- Using CDO values can result in incorrect C++ implementations that don't match the original Blueprint behavior
+- This is especially critical for visual systems, gameplay parameters, and configuration data
+
+**Documentation Impact:**
+This distinction should be highlighted in:
+- MCP server tool descriptions (index.js)
+- This AGENTS.md file (done)
+- Code comments in MCPServer.cpp for `read_class_defaults`
+
 **Interface Function Parameter Modification (2026-02-01):**
 - `list_structs` - Debug command: List all registered UScriptStruct objects matching a pattern. Useful for discovering struct names available via reflection. Note: UE strips the 'F' prefix from C++ struct names (e.g., `FS_PlayerInputState` becomes `S_PlayerInputState` in reflection).
 - `modify_interface_function_parameter` - Modify a parameter type in a Blueprint Interface function. Can change struct types between Blueprint and C++ versions. **Warning:** Changing between Blueprint structs (at `/Game/...`) and C++ structs (at `/Script/...`) will cause "Only exactly matching structures are considered compatible" errors in all blueprints using that interface until they are also updated.

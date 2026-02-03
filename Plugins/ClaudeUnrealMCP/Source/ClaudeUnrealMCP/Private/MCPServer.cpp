@@ -710,6 +710,35 @@ FString FMCPServer::HandleReadVariables(const TSharedPtr<FJsonObject>& Params)
 	return MakeResponse(true, Data);
 }
 
+/**
+ * HandleReadClassDefaults - Read Blueprint Class Default Object (CDO) properties
+ *
+ * CRITICAL LIMITATION (2026-02-03):
+ * This function reads the Blueprint Class Default Object, which contains class-level default values.
+ * It does NOT read property overrides set on level actor instances in the Details panel.
+ *
+ * WHY THIS MATTERS:
+ * - When you place a Blueprint actor in a level and modify properties in the Details panel,
+ *   those overrides are stored in the LEVEL FILE (.umap), not the Blueprint asset (.uasset)
+ * - Blueprint CDO values are often "first iteration" or placeholder values
+ * - The actual working behavior typically comes from level instance overrides
+ * - Using CDO values for C++ conversion can result in incorrect implementations
+ *
+ * WHEN TO USE EACH COMMAND:
+ * - read_class_defaults: Reading Blueprint schema (available properties, types, metadata)
+ * - read_actor_properties: Reading actual working values from a level instance
+ *
+ * EXAMPLE - LevelVisuals FogColor:
+ * - CDO value (from this function): Light purple (0.79, 0.75, 1.0) - WRONG for dark mode
+ * - Level instance value: Dark gray (0.261, 0.261, 0.302) - CORRECT working value
+ *
+ * SOLUTION WORKFLOW:
+ * When copying reference data from a working project:
+ * 1. Copy the LEVEL FILE (.umap), not just Blueprint assets
+ * 2. Open the level in Unreal Editor
+ * 3. Use read_actor_properties to get actual instance values
+ * 4. Use those values in your C++ implementation
+ */
 FString FMCPServer::HandleReadClassDefaults(const TSharedPtr<FJsonObject>& Params)
 {
 	if (!Params.IsValid() || !Params->HasField(TEXT("path")))
@@ -726,6 +755,7 @@ FString FMCPServer::HandleReadClassDefaults(const TSharedPtr<FJsonObject>& Param
 	}
 
 	// Get the generated class and its CDO
+	// NOTE: This is the class-level CDO, not a level instance with property overrides!
 	UClass* GeneratedClass = Blueprint->GeneratedClass;
 	if (!GeneratedClass)
 	{
@@ -4024,6 +4054,38 @@ FString FMCPServer::HandleRenameBlueprintFunction(const TSharedPtr<FJsonObject>&
 	return MakeResponse(true, Data);
 }
 
+/**
+ * HandleReadActorProperties - Read actual property values from a level actor instance
+ *
+ * RECOMMENDED METHOD (2026-02-03):
+ * This is the CORRECT way to read actual working values from a Blueprint actor in a level.
+ *
+ * WHY USE THIS INSTEAD OF read_class_defaults:
+ * - Reads property overrides set in the Details panel (stored in level .umap file)
+ * - Returns ACTUAL gameplay-tested values, not class defaults
+ * - Gets the real working behavior from a reference project
+ * - Essential for accurate Blueprint-to-C++ conversion
+ *
+ * WORKFLOW FOR COPYING REFERENCE DATA:
+ * When you need to copy correct values from a working project (e.g., GameAnimationSample):
+ * 1. Copy the level file (.umap) from the working project to your project
+ * 2. Open the level in Unreal Editor
+ * 3. Use this command to read the actor instance
+ * 4. Extract the property values from the response
+ * 5. Use those values in your C++ implementation
+ *
+ * EXAMPLE - LevelVisuals Style Values:
+ * - Blueprint CDO (read_class_defaults): FogColor = (0.79, 0.75, 1.0) ❌ Wrong
+ * - Level Instance (this function): FogColor = (0.261, 0.261, 0.302) ✅ Correct
+ *
+ * The level instance values match the actual gameplay behavior seen in the reference project.
+ *
+ * USE CASES:
+ * - Preserving actor configuration before blueprint reparenting
+ * - Getting reference values from a working project for C++ conversion
+ * - Debugging property override issues
+ * - Comparing class defaults vs instance values
+ */
 FString FMCPServer::HandleReadActorProperties(const TSharedPtr<FJsonObject>& Params)
 {
 	if (!Params.IsValid() || !Params->HasField(TEXT("actor_name")))
@@ -4039,7 +4101,7 @@ FString FMCPServer::HandleReadActorProperties(const TSharedPtr<FJsonObject>& Par
 		return MakeError(TEXT("No world available"));
 	}
 
-	// Find the actor by name
+	// Find the actor by name in the current level
 	AActor* FoundActor = nullptr;
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
