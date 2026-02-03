@@ -485,6 +485,10 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleReconstructActor(Params);
 	}
+	else if (Command == TEXT("clear_component_map_value_array"))
+	{
+		return HandleClearComponentMapValueArray(Params);
+	}
 
 	return MakeError(FString::Printf(TEXT("Unknown command: %s"), *Command));
 }
@@ -4780,6 +4784,167 @@ FString FMCPServer::HandleReconstructActor(const TSharedPtr<FJsonObject>& Params
 	Data->SetStringField(TEXT("message"), TEXT("Actor reconstructed successfully"));
 	Data->SetStringField(TEXT("actor_name"), ActorName);
 	Data->SetStringField(TEXT("actor_class"), FoundActor->GetClass()->GetName());
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleClearComponentMapValueArray(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return MakeError(TEXT("Invalid parameters"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	const FString ComponentName = Params->GetStringField(TEXT("component_name"));
+	const FString MapPropertyName = Params->GetStringField(TEXT("map_property_name"));
+	const FString MapKey = Params->GetStringField(TEXT("map_key"));
+	const FString ArrayPropertyName = Params->GetStringField(TEXT("array_property_name"));
+
+	if (BlueprintPath.IsEmpty() || ComponentName.IsEmpty() || MapPropertyName.IsEmpty() ||
+		MapKey.IsEmpty() || ArrayPropertyName.IsEmpty())
+	{
+		return MakeError(TEXT("Missing required parameters"));
+	}
+
+	// Load the blueprint
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+	}
+
+	// Get the SimpleConstructionScript
+	USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript;
+	if (!SCS)
+	{
+		return MakeError(TEXT("Blueprint has no SimpleConstructionScript"));
+	}
+
+	// Find the component node
+	USCS_Node* ComponentNode = nullptr;
+	for (USCS_Node* Node : SCS->GetAllNodes())
+	{
+		if (Node && Node->GetVariableName().ToString() == ComponentName)
+		{
+			ComponentNode = Node;
+			break;
+		}
+	}
+
+	if (!ComponentNode)
+	{
+		return MakeError(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+	}
+
+	// Get the component template
+	UObject* ComponentTemplate = ComponentNode->ComponentTemplate;
+	if (!ComponentTemplate)
+	{
+		return MakeError(TEXT("Component template is null"));
+	}
+
+	// Find the map property
+	FMapProperty* MapProperty = FindFProperty<FMapProperty>(ComponentTemplate->GetClass(), *MapPropertyName);
+	if (!MapProperty)
+	{
+		return MakeError(FString::Printf(TEXT("Map property not found: %s"), *MapPropertyName));
+	}
+
+	// Get the map helper
+	void* MapPtr = MapProperty->ContainerPtrToValuePtr<void>(ComponentTemplate);
+	FScriptMapHelper MapHelper(MapProperty, MapPtr);
+
+	// Find the key in the map
+	int32 FoundIndex = -1;
+	FProperty* KeyProp = MapProperty->KeyProp;
+
+	// Create a temporary key to search with
+	void* TempKey = FMemory::Malloc(KeyProp->GetSize());
+	KeyProp->InitializeValue(TempKey);
+
+	if (FNameProperty* NameKeyProp = CastField<FNameProperty>(KeyProp))
+	{
+		FName KeyName(*MapKey);
+		NameKeyProp->SetPropertyValue(TempKey, KeyName);
+	}
+	else if (FStrProperty* StrKeyProp = CastField<FStrProperty>(KeyProp))
+	{
+		StrKeyProp->SetPropertyValue(TempKey, MapKey);
+	}
+	else
+	{
+		KeyProp->DestroyValue(TempKey);
+		FMemory::Free(TempKey);
+		return MakeError(TEXT("Unsupported key type (only FName and FString supported)"));
+	}
+
+	// Find the key in the map
+	for (int32 i = 0; i < MapHelper.Num(); i++)
+	{
+		if (MapHelper.IsValidIndex(i))
+		{
+			const void* KeyPtr = MapHelper.GetKeyPtr(i);
+			if (KeyProp->Identical(KeyPtr, TempKey))
+			{
+				FoundIndex = i;
+				break;
+			}
+		}
+	}
+
+	KeyProp->DestroyValue(TempKey);
+	FMemory::Free(TempKey);
+
+	if (FoundIndex == -1)
+	{
+		return MakeError(FString::Printf(TEXT("Key not found in map: %s"), *MapKey));
+	}
+
+	// Get the value object at this index
+	uint8* ValuePtr = MapHelper.GetValuePtr(FoundIndex);
+	FObjectProperty* ValueProp = CastField<FObjectProperty>(MapProperty->ValueProp);
+	if (!ValueProp)
+	{
+		return MakeError(TEXT("Map value is not an object property"));
+	}
+
+	UObject* ValueObject = ValueProp->GetObjectPropertyValue(ValuePtr);
+	if (!ValueObject)
+	{
+		return MakeError(TEXT("Map value object is null"));
+	}
+
+	// Find the array property in the value object
+	FArrayProperty* ArrayProp = FindFProperty<FArrayProperty>(ValueObject->GetClass(), *ArrayPropertyName);
+	if (!ArrayProp)
+	{
+		return MakeError(FString::Printf(TEXT("Array property not found in value object: %s"), *ArrayPropertyName));
+	}
+
+	// Mark for modification
+	Blueprint->Modify();
+	ComponentTemplate->Modify();
+	ValueObject->Modify();
+
+	// Get the array helper and clear it
+	void* ArrayPtr = ArrayProp->ContainerPtrToValuePtr<void>(ValueObject);
+	FScriptArrayHelper ArrayHelper(ArrayProp, ArrayPtr);
+
+	int32 OldSize = ArrayHelper.Num();
+	ArrayHelper.EmptyValues();
+
+	// Mark as dirty
+	Blueprint->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Array cleared successfully"));
+	Data->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+	Data->SetStringField(TEXT("component_name"), ComponentName);
+	Data->SetStringField(TEXT("map_property"), MapPropertyName);
+	Data->SetStringField(TEXT("map_key"), MapKey);
+	Data->SetStringField(TEXT("array_property"), ArrayPropertyName);
+	Data->SetNumberField(TEXT("elements_cleared"), OldSize);
 
 	return MakeResponse(true, Data);
 }

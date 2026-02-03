@@ -1418,3 +1418,62 @@ They will NOT interfere with the C++ implementations since they're not placed in
 
 **Updated Total**: 11 reference Blueprints preserved (9 actors + 2 structs)
 
+temp_session3.md is ./temp_session3.md
+
+
+---
+
+## Session 3: Transition Blueprint Replacement & MCP Tool Development (2026-02-03)
+
+### Objective
+Replace empty transition blueprint wrappers (BP_MovementTransition_ToSlide, BP_MovementTransition_FromSlide) with C++ class instances
+
+### Problem Encountered
+After replacing transition instances in movement mode blueprint CDOs and deleting transition blueprint assets:
+- ✅ BP_MovementMode_Walking compiles (0 errors)
+- ✅ BP_MovementMode_Slide compiles (0 errors)
+- ❌ SandboxCharacter_Mover validation error: "Invalid or missing transition object on mode of type BP_MovementMode_Walking/Slide"
+
+**Root Cause**: Movement mode instances stored in SandboxCharacter_Mover's CharacterMover.MovementModes map are sub-objects with their own Transitions arrays. When we replaced transitions in the movement mode blueprint CDOs, the character's instances retained stale references to deleted blueprint assets.
+
+### Solution: New MCP Tool
+Created `clear_component_map_value_array` MCP command to modify properties within map value objects.
+
+**Implementation Files:**
+- `Plugins/ClaudeUnrealMCP/Source/ClaudeUnrealMCP/Public/MCPServer.h` - Added HandleClearComponentMapValueArray declaration
+- `Plugins/ClaudeUnrealMCP/Source/ClaudeUnrealMCP/Private/MCPServer.cpp` - Implemented handler using FScriptMapHelper and FScriptArrayHelper
+- `Plugins/ClaudeUnrealMCP/MCPServer/index.js` - Added tool definition with schema
+- `AGENTS.md` - Added note about AI assistant running restart command directly
+
+**Tool Usage:**
+```javascript
+await clear_component_map_value_array({
+  blueprint_path: "/Game/Blueprints/SandboxCharacter_Mover",
+  component_name: "CharacterMover",
+  map_property_name: "MovementModes",
+  map_key: "Walking",
+  array_property_name: "Transitions"
+});
+```
+
+### Results
+- ✅ Cleared 1 stale transition from Walking mode instance
+- ✅ Cleared 1 stale transition from Sliding mode instance
+- ✅ SandboxCharacter_Mover compiles successfully (0 errors)
+- ✅ All 69 blueprints compile with 0 errors
+
+### Blueprints Successfully Deleted
+- BP_MovementMode_Falling (replaced with C++ FallingMode)
+- BP_MovementTransition_FromSlide (replaced with C++ UBP_MovementTransition_FromSlide)
+- BP_MovementTransition_ToSlide (replaced with C++ UBP_MovementTransition_ToSlide)
+
+**Total**: 3 empty blueprint wrappers replaced with C++ classes
+
+### Key Learnings
+1. **Blueprint CDO vs Instance Data**: Changes to blueprint CDOs don't automatically update existing instances stored as sub-objects in other blueprints
+2. **Map Value Sub-Objects**: Objects stored in component map properties (like MovementModes) are outer-ed to the component, not the blueprint class
+3. **Validation Scope**: Validation errors can occur at the consumer level (SandboxCharacter_Mover) even when the provider blueprints (BP_MovementMode_Walking) compile successfully
+4. **MCP Extensibility**: When encountering limitations, create new MCP tools to remove blockers - this tool will be useful for future similar scenarios
+
+### Next Steps
+Continue replacing remaining empty blueprint wrappers with C++ implementations.

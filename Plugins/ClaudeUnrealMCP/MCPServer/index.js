@@ -1014,6 +1014,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["actor_name"],
         },
       },
+      {
+        name: "clear_component_map_value_array",
+        description: "Clear an array property within an object stored in a component's map property. Use this to clear stale data from sub-objects (e.g., clear Transitions array in movement mode instances stored in CharacterMover's MovementModes map).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            component_name: {
+              type: "string",
+              description: "Name of the component (e.g., CharacterMover)",
+            },
+            map_property_name: {
+              type: "string",
+              description: "Name of the map property (e.g., MovementModes)",
+            },
+            map_key: {
+              type: "string",
+              description: "The key in the map (e.g., 'Walking', 'Sliding')",
+            },
+            array_property_name: {
+              type: "string",
+              description: "Name of the array property in the map value object (e.g., Transitions)",
+            },
+          },
+          required: ["blueprint_path", "component_name", "map_property_name", "map_key", "array_property_name"],
+        },
+      },
     ],
   };
 });

@@ -56,6 +56,7 @@ The MCP server:
 - After modifying C++ code in the MCP plugin and recompiling, Unreal Engine must be restarted to load the new DLL
 - macOS: `npm run restart:ue` (from project root)
 - Windows: `npm run restart:ue:win` (from project root)
+- **AI Assistant Note**: The assistant can run the restart command directly using Bash tool: `cd "E:\repo\unreal_engine\UE5MCPTest" && npm run restart:ue:win`
 - Note: `/mcp` command in Claude Code only restarts the Node.js MCP server, not Unreal Engine itself
 
 ### MCP Server Extensibility
@@ -211,6 +212,9 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 - `set_actor_properties` - Set EditAnywhere properties on a level actor instance. Accepts JSON object with property name-value pairs (as returned by read_actor_properties). Does NOT trigger reconstruction - use `reconstruct_actor` separately if needed.
 - `reconstruct_actor` - Trigger OnConstruction on a level actor by calling `RerunConstructionScripts()`. Use this after reparenting blueprints to C++ to apply C++ initialization logic (e.g., UpdateLevelVisuals, UpdateMaterials) to existing level instances that weren't automatically updated.
 
+**Component Map Value Property Commands (Sprint 3 - 2026-02-03):**
+- `clear_component_map_value_array` - Clear an array property within an object stored in a component's map property. Use this to fix stale sub-object data (e.g., clearing Transitions arrays in movement mode instances stored in CharacterMover's MovementModes map after replacing blueprint transitions with C++ classes).
+
 ### CRITICAL: Blueprint CDO vs Level Instance Properties
 
 **⚠️ IMPORTANT LIMITATION** discovered 2026-02-03: The MCP `read_class_defaults` command reads Blueprint Class Default Object (CDO) values, NOT level instance property overrides.
@@ -320,6 +324,48 @@ await reconstruct_actor({ actor_name: "LevelVisuals_C_6" });
 // Step 5: Save level
 await save_all();
 ```
+
+### CRITICAL: Blueprint Sub-Object Property Updates (2026-02-03)
+
+**⚠️ IMPORTANT PATTERN** discovered during transition blueprint replacement: Changes to blueprint CDOs don't automatically propagate to existing sub-object instances stored in other blueprints.
+
+**The Problem:**
+When objects are stored as sub-objects in component properties (e.g., movement mode instances in CharacterMover.MovementModes map), they have their own independent property values that are NOT linked to the blueprint CDO. Example:
+
+1. Blueprint A (BP_MovementMode_Walking) has a CDO with Transitions array
+2. Blueprint B (SandboxCharacter_Mover) contains an instance of BP_MovementMode_Walking stored in CharacterMover.MovementModes["Walking"]
+3. The instance in Blueprint B has its OWN copy of the Transitions array
+4. Changing the CDO's Transitions array doesn't affect the instance's Transitions array
+
+**Symptom:**
+- ✅ Movement mode blueprints compile successfully
+- ❌ Consumer blueprint (SandboxCharacter_Mover) has validation errors: "Invalid or missing transition object"
+- Root cause: Consumer's instances have stale references to deleted blueprint assets
+
+**Solution:**
+Use `clear_component_map_value_array` to modify properties within sub-objects:
+
+```javascript
+// Clear stale Transitions array in Walking mode instance
+await clear_component_map_value_array({
+  blueprint_path: "/Game/Blueprints/SandboxCharacter_Mover",
+  component_name: "CharacterMover",
+  map_property_name: "MovementModes",
+  map_key: "Walking",
+  array_property_name: "Transitions"
+});
+```
+
+**Key Insights:**
+1. **Sub-objects are outer-ed to their container**: Movement mode instances in the map are outer-ed to the CharacterMover component, not to BP_MovementMode_Walking
+2. **Property independence**: Sub-object properties are independent copies, not references to CDO values
+3. **Validation scope**: Validation errors appear at the consumer level, not the provider level
+4. **When to use this tool**: After replacing blueprint instances with C++ classes and deleting blueprint assets, clear any stale references in consumer blueprints
+
+**Related Tools:**
+- `read_component_properties` - Inspect what's in a component's map property
+- `replace_component_map_value` - Replace entire map value objects (doesn't update sub-properties)
+- `clear_component_map_value_array` - Clear array properties within map value objects (fixes stale references)
 
 ## Recent MCP Improvements
 

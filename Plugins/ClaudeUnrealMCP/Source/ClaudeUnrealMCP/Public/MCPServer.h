@@ -78,6 +78,9 @@ private:
 	FString HandleSetActorProperties(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReconstructActor(const TSharedPtr<FJsonObject>& Params);
 
+	// Component map value manipulation (Sprint 3)
+	FString HandleClearComponentMapValueArray(const TSharedPtr<FJsonObject>& Params);
+
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));
 	FString MakeError(const FString& Error);
