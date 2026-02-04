@@ -600,6 +600,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "remove_implemented_interface",
+        description: "Remove an implemented interface from a blueprint. Use this when a blueprint has interface function overrides that conflict with C++ parent implementations.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            interface_name: {
+              type: "string",
+              description: "Name of the interface to remove (e.g., 'BPI_SandboxCharacter_Pawn')",
+            },
+          },
+          required: ["blueprint_path", "interface_name"],
+        },
+      },
+      {
         name: "list_structs",
         description: "Debug command: List all registered UScriptStruct objects matching a pattern. Useful for discovering discoverable struct names.",
         inputSchema: {
@@ -1125,6 +1143,62 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["blueprint_path", "source_node_id", "source_pin", "target_node_id", "target_pin"],
+        },
+      },
+      {
+        name: "disconnect_pin",
+        description: "Break all connections from/to a specific pin on a blueprint node. Use this to remove unwanted wiring before creating new connections.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            node_id: {
+              type: "string",
+              description: "GUID of the node (from read_event_graph 'id' field)",
+            },
+            pin_name: {
+              type: "string",
+              description: "Name of the pin to disconnect (e.g., 'Completed', 'ActionValue', 'WantsToSprint_1_xxx')",
+            },
+            graph_name: {
+              type: "string",
+              description: "Name of the graph (default: 'EventGraph')",
+            },
+          },
+          required: ["blueprint_path", "node_id", "pin_name"],
+        },
+      },
+      {
+        name: "add_set_struct_node",
+        description: "Add a new 'Set members in Struct' node to a blueprint event graph. Use this to create nodes that set struct field values.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            struct_type: {
+              type: "string",
+              description: "Name or path of the struct type (e.g., 'S_PlayerInputState' for blueprint structs)",
+            },
+            graph_name: {
+              type: "string",
+              description: "Name of the graph (default: 'EventGraph')",
+            },
+            x: {
+              type: "integer",
+              description: "X position for the node (optional)",
+            },
+            y: {
+              type: "integer",
+              description: "Y position for the node (optional)",
+            },
+          },
+          required: ["blueprint_path", "struct_type"],
         },
       },
       // Sprint 6: Input System Reading
