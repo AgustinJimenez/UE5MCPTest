@@ -344,25 +344,36 @@ E_Gait ASandboxCharacter_CMC::GetDesiredGait()
 
 bool ASandboxCharacter_CMC::CanSprint() const
 {
-	// Get input vector (locally controlled uses pending input, simulated uses acceleration)
+	if (!CharacterInputState.WantsToSprint || !GetCharacterMovement())
+	{
+		return false;
+	}
+
+	// Local pawns can have pending input consumed before Tick, so fall back to acceleration.
 	FVector InputVector = IsLocallyControlled()
 		? GetPendingMovementInputVector()
 		: GetCharacterMovement()->GetCurrentAcceleration();
+	if (InputVector.IsNearlyZero())
+	{
+		InputVector = GetCharacterMovement()->GetCurrentAcceleration();
+	}
 
-	// Convert to rotation and calculate yaw delta from actor rotation
-	FRotator InputRotation = InputVector.ToOrientationRotator();
-	FRotator ActorRotation = GetActorRotation();
-	FRotator DeltaRotation = UKismetMathLibrary::NormalizedDeltaRotator(ActorRotation, InputRotation);
+	if (InputVector.IsNearlyZero())
+	{
+		return false;
+	}
 
-	// Check if input is forward-facing (within 50 degrees)
-	double AbsYaw = FMath::Abs(DeltaRotation.Yaw);
-	bool bIsForwardInput = AbsYaw < 50.0;
+	// If character rotates to movement, any movement direction can sprint.
+	if (GetCharacterMovement()->bOrientRotationToMovement)
+	{
+		return true;
+	}
 
-	// If orient rotation to movement, always allow sprint, otherwise check forward input
-	bool bCanSprintBasedOnRotation = GetCharacterMovement()->bOrientRotationToMovement || bIsForwardInput;
-
-	// Final check: wants to sprint AND rotation allows it
-	return CharacterInputState.WantsToSprint && bCanSprintBasedOnRotation;
+	// Otherwise use control yaw as the forward reference (matches strafe-style movement).
+	const float ReferenceYaw = Controller ? Controller->GetControlRotation().Yaw : GetActorRotation().Yaw;
+	const float InputYaw = InputVector.ToOrientationRotator().Yaw;
+	const float AbsYawDelta = FMath::Abs(FRotator::NormalizeAxis(InputYaw - ReferenceYaw));
+	return AbsYawDelta < 60.0f;
 }
 
 double ASandboxCharacter_CMC::CalculateMaxSpeed()

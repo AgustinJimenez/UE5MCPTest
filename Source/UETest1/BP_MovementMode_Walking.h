@@ -19,6 +19,13 @@ public:
 	virtual void SimulationTick_Implementation(const FSimulationTickParams& Params, FMoverTickEndData& OutputState) override;
 	virtual void GenerateMove_Implementation(const FMoverTickStartData& StartState, const FMoverTimeStep& TimeStep, FProposedMove& OutProposedMove) const override;
 
+	// Blueprint hook used by BP_MovementMode_Walking to apply gait-based tuning (walk/run/sprint).
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Mover")
+	void GenerateWalkMove(FMoverTickStartData& StartState, float DeltaSeconds, const FVector& DesiredVelocity,
+		const FQuat& DesiredFacing, const FQuat& CurrentFacing, FVector& InOutAngularVelocityDegrees, FVector& InOutVelocity);
+	virtual void GenerateWalkMove_Implementation(FMoverTickStartData& StartState, float DeltaSeconds, const FVector& DesiredVelocity,
+		const FQuat& DesiredFacing, const FQuat& CurrentFacing, FVector& InOutAngularVelocityDegrees, FVector& InOutVelocity);
+
 protected:
 	/** Generate smooth walk move - the core smooth walking logic */
 	void GenerateSmoothWalkMove(FMoverTickStartData& StartState, float DeltaSeconds, const FVector& DesiredVelocity,

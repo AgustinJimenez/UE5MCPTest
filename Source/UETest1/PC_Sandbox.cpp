@@ -10,6 +10,76 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
 #include "GameFramework/GameModeBase.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerInput.h"
+#include "InputCoreTypes.h"
+#include "SandboxCharacter_CMC.h"
+#include "UObject/Field.h"
+#include "UObject/UnrealType.h"
+
+namespace
+{
+	bool TryReadBPInputState(UObject* Object, bool& bOutWantsSprint, bool& bOutWantsWalk, FString& OutGaitName)
+	{
+		if (!Object)
+		{
+			return false;
+		}
+
+		UClass* Class = Object->GetClass();
+		if (!Class)
+		{
+			return false;
+		}
+
+		bool bAnyRead = false;
+		bOutWantsSprint = false;
+		bOutWantsWalk = false;
+		OutGaitName = TEXT("Unknown");
+
+		if (const FStructProperty* InputStateProp = FindFProperty<FStructProperty>(Class, TEXT("CharacterInputState")))
+		{
+			void* InputStatePtr = InputStateProp->ContainerPtrToValuePtr<void>(Object);
+			if (InputStatePtr && InputStateProp->Struct)
+			{
+				for (TFieldIterator<FProperty> It(InputStateProp->Struct); It; ++It)
+				{
+					const FProperty* MemberProp = *It;
+					if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(MemberProp))
+					{
+						const FString MemberName = MemberProp->GetName();
+						if (MemberName.Contains(TEXT("WantsToSprint")))
+						{
+							bOutWantsSprint = BoolProp->GetPropertyValue_InContainer(InputStatePtr);
+							bAnyRead = true;
+						}
+						else if (MemberName.Contains(TEXT("WantsToWalk")))
+						{
+							bOutWantsWalk = BoolProp->GetPropertyValue_InContainer(InputStatePtr);
+							bAnyRead = true;
+						}
+					}
+				}
+			}
+		}
+
+		if (const FByteProperty* GaitProp = FindFProperty<FByteProperty>(Class, TEXT("Gait")))
+		{
+			const uint8 GaitValue = GaitProp->GetPropertyValue_InContainer(Object);
+			if (GaitProp->Enum)
+			{
+				OutGaitName = GaitProp->Enum->GetNameStringByValue(GaitValue);
+			}
+			else
+			{
+				OutGaitName = FString::FromInt(static_cast<int32>(GaitValue));
+			}
+			bAnyRead = true;
+		}
+
+		return bAnyRead;
+	}
+}
 
 APC_Sandbox::APC_Sandbox()
 {
@@ -27,6 +97,23 @@ APC_Sandbox::APC_Sandbox()
 void APC_Sandbox::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Force-remove Shift debug exec bindings at runtime so LeftShift can be used for sprint.
+	if (PlayerInput)
+	{
+		const int32 Before = PlayerInput->DebugExecBindings.Num();
+		PlayerInput->DebugExecBindings.RemoveAll([](const FKeyBind& Bind)
+		{
+			const bool bLeftPrev = (Bind.Key == EKeys::LeftShift) && Bind.Command.Contains(TEXT("DebugManager.CycleToPreviousColumn"));
+			const bool bRightNext = (Bind.Key == EKeys::RightShift) && Bind.Command.Contains(TEXT("DebugManager.CycleToNextColumn"));
+			return bLeftPrev || bRightNext;
+		});
+		const int32 Removed = Before - PlayerInput->DebugExecBindings.Num();
+		if (Removed > 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("PC_Sandbox::BeginPlay - Removed %d Shift debug exec binding(s)"), Removed);
+		}
+	}
 
 	// Load IMC_Sandbox at runtime if not already set
 	if (!IMC_Sandbox)
@@ -88,6 +175,37 @@ void APC_Sandbox::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// Temporary runtime fallback: enforce sprint speed/gait for SandboxCharacter_CMC blueprint instances.
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (ACharacter* CharacterPawn = Cast<ACharacter>(ControlledPawn))
+		{
+			bool bWantsSprint = false;
+			bool bWantsWalk = false;
+			FString GaitName;
+			if (TryReadBPInputState(ControlledPawn, bWantsSprint, bWantsWalk, GaitName))
+			{
+				if (UCharacterMovementComponent* CMC = CharacterPawn->GetCharacterMovement())
+				{
+					const bool bHasMoveInput = ControlledPawn->GetPendingMovementInputVector().Size2D() > 0.1f || CMC->GetCurrentAcceleration().Size2D() > 0.1f;
+					const bool bShouldSprint = bWantsSprint && bHasMoveInput;
+					const float TargetMaxWalkSpeed = bShouldSprint ? 700.0f : 500.0f;
+					if (!FMath::IsNearlyEqual(CMC->MaxWalkSpeed, TargetMaxWalkSpeed, 1.0f))
+					{
+						CMC->MaxWalkSpeed = TargetMaxWalkSpeed;
+					}
+
+					// Keep animation state aligned with speed override for the BP enum.
+					if (FByteProperty* GaitProp = FindFProperty<FByteProperty>(ControlledPawn->GetClass(), TEXT("Gait")))
+					{
+						const uint8 TargetGait = bShouldSprint ? 2 : 1; // E_Gait: Walk=0, Run=1, Sprint=2
+						GaitProp->SetPropertyValue_InContainer(ControlledPawn, TargetGait);
+					}
+				}
+			}
+		}
+	}
+
 	// Hide virtual joystick on mobile when gamepad is connected
 	FString PlatformName = UGameplayStatics::GetPlatformName();
 	bool bIsAndroid = UKismetStringLibrary::EqualEqual_StriStri(PlatformName, TEXT("Android"));
@@ -99,6 +217,83 @@ void APC_Sandbox::Tick(float DeltaTime)
 		if (bGamepadConnected)
 		{
 			SetVirtualJoystickVisibility(false);
+		}
+	}
+
+	// Sprint input probe: emit runtime state every 0.5s while testing sprint behavior.
+	static float SprintProbeAccum = 0.0f;
+	SprintProbeAccum += DeltaTime;
+	if (SprintProbeAccum >= 0.5f)
+	{
+		SprintProbeAccum = 0.0f;
+
+		const bool bLeftShiftDown = IsInputKeyDown(EKeys::LeftShift);
+		const bool bRightShiftDown = IsInputKeyDown(EKeys::RightShift);
+		APawn* ControlledPawn = GetPawn();
+
+		if (ASandboxCharacter_CMC* CMCCharacter = Cast<ASandboxCharacter_CMC>(ControlledPawn))
+		{
+			const UEnum* GaitEnum = StaticEnum<E_Gait>();
+			const FString GaitName = GaitEnum ? GaitEnum->GetNameStringByValue(static_cast<int64>(CMCCharacter->Gait)) : TEXT("Unknown");
+			UE_LOG(LogTemp, Warning,
+				TEXT("SPRINT_PROBE Pawn=%s Shift(L/R)=%d/%d WantsSprint=%d WantsWalk=%d WantsStrafe=%d Gait=%s Speed2D=%.1f MaxWalk=%.1f"),
+				*CMCCharacter->GetClass()->GetName(),
+				bLeftShiftDown ? 1 : 0,
+				bRightShiftDown ? 1 : 0,
+				CMCCharacter->CharacterInputState.WantsToSprint ? 1 : 0,
+				CMCCharacter->CharacterInputState.WantsToWalk ? 1 : 0,
+				CMCCharacter->CharacterInputState.WantsToStrafe ? 1 : 0,
+				*GaitName,
+				CMCCharacter->GetVelocity().Size2D(),
+				CMCCharacter->GetCharacterMovement() ? CMCCharacter->GetCharacterMovement()->MaxWalkSpeed : -1.0f);
+		}
+		else if (ControlledPawn)
+		{
+			bool bWantsSprint = false;
+			bool bWantsWalk = false;
+			FString GaitName;
+			const bool bReadState = TryReadBPInputState(ControlledPawn, bWantsSprint, bWantsWalk, GaitName);
+			const ACharacter* CharacterPawn = Cast<ACharacter>(ControlledPawn);
+			const float MaxWalkSpeed = CharacterPawn && CharacterPawn->GetCharacterMovement()
+				? CharacterPawn->GetCharacterMovement()->MaxWalkSpeed
+				: -1.0f;
+			const FVector PendingInput = ControlledPawn->GetPendingMovementInputVector();
+			const float PendingInput2D = PendingInput.Size2D();
+			const FVector CurrentAccel = CharacterPawn && CharacterPawn->GetCharacterMovement()
+				? CharacterPawn->GetCharacterMovement()->GetCurrentAcceleration()
+				: FVector::ZeroVector;
+			const float CurrentAccel2D = CurrentAccel.Size2D();
+			const bool bOrientToMovement = CharacterPawn && CharacterPawn->GetCharacterMovement()
+				? CharacterPawn->GetCharacterMovement()->bOrientRotationToMovement
+				: false;
+
+			float YawDeltaDeg = -1.0f;
+			if (CurrentAccel2D > KINDA_SMALL_NUMBER)
+			{
+				const float InputYaw = CurrentAccel.ToOrientationRotator().Yaw;
+				const float ActorYaw = ControlledPawn->GetActorRotation().Yaw;
+				YawDeltaDeg = FMath::Abs(FRotator::NormalizeAxis(ActorYaw - InputYaw));
+			}
+
+			UE_LOG(LogTemp, Warning,
+				TEXT("SPRINT_PROBE Pawn=%s Shift(L/R)=%d/%d Speed2D=%.1f MaxWalk=%.1f ReadState=%d WantsSprint=%d WantsWalk=%d Gait=%s OrientToMove=%d Accel2D=%.1f Pending2D=%.1f YawDelta=%.1f"),
+				*ControlledPawn->GetClass()->GetName(),
+				bLeftShiftDown ? 1 : 0,
+				bRightShiftDown ? 1 : 0,
+				ControlledPawn->GetVelocity().Size2D(),
+				MaxWalkSpeed,
+				bReadState ? 1 : 0,
+				bWantsSprint ? 1 : 0,
+				bWantsWalk ? 1 : 0,
+				*GaitName,
+				bOrientToMovement ? 1 : 0,
+				CurrentAccel2D,
+				PendingInput2D,
+				YawDeltaDeg);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("SPRINT_PROBE Pawn=None Shift(L/R)=%d/%d"), bLeftShiftDown ? 1 : 0, bRightShiftDown ? 1 : 0);
 		}
 	}
 }

@@ -93,12 +93,18 @@ void UBP_MovementMode_Walking::GenerateMove_Implementation(const FMoverTickStart
 	OutProposedMove.LinearVelocity = StartingSyncState->GetVelocity_WorldSpace();
 	FVector AngularVelocityDegrees = StartingSyncState->GetAngularVelocityDegrees_WorldSpace();
 
-	// Call our smooth walk move implementation
-	const_cast<UBP_MovementMode_Walking*>(this)->GenerateSmoothWalkMove(
+	// Route through BlueprintNativeEvent so BP_MovementMode_Walking can apply gait-specific tuning.
+	const_cast<UBP_MovementMode_Walking*>(this)->GenerateWalkMove(
 		const_cast<FMoverTickStartData&>(StartState), DeltaSeconds, DesiredVelocity,
 		DesiredFacing, CurrentFacing, AngularVelocityDegrees, OutProposedMove.LinearVelocity);
 
 	OutProposedMove.AngularVelocityDegrees = AngularVelocityDegrees;
+}
+
+void UBP_MovementMode_Walking::GenerateWalkMove_Implementation(FMoverTickStartData& StartState, float DeltaSeconds, const FVector& DesiredVelocity,
+	const FQuat& DesiredFacing, const FQuat& CurrentFacing, FVector& InOutAngularVelocityDegrees, FVector& InOutVelocity)
+{
+	GenerateSmoothWalkMove(StartState, DeltaSeconds, DesiredVelocity, DesiredFacing, CurrentFacing, InOutAngularVelocityDegrees, InOutVelocity);
 }
 
 void UBP_MovementMode_Walking::GenerateSmoothWalkMove(FMoverTickStartData& StartState, float DeltaSeconds, const FVector& DesiredVelocity,
