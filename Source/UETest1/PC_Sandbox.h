@@ -7,6 +7,7 @@
 #include "PC_Sandbox.generated.h"
 
 class UInputAction;
+class UInputMappingContext;
 struct FInputActionValue;
 class UEnhancedInputComponent;
 
@@ -37,6 +38,10 @@ protected:
 	// Maximum distance for teleport trace
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sandbox")
 	float TeleportMaxDistance;
+
+	// Input Mapping Context for character controls (Sprint, Walk, Move, etc.)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputMappingContext> IMC_Sandbox;
 
 	// Enhanced Input Actions
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")

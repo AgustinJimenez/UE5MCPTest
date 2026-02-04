@@ -494,6 +494,19 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleReplaceComponentClass(Params);
 	}
+	else if (Command == TEXT("set_blueprint_cdo_property"))
+	{
+		return HandleSetBlueprintCDOProperty(Params);
+	}
+	else if (Command == TEXT("remove_implemented_interface"))
+	{
+		return HandleRemoveImplementedInterface(Params);
+	}
+	// Blueprint node manipulation (Sprint 5)
+	else if (Command == TEXT("connect_nodes"))
+	{
+		return HandleConnectNodes(Params);
+	}
 
 	return MakeError(FString::Printf(TEXT("Unknown command: %s"), *Command));
 }
@@ -3893,6 +3906,7 @@ FString FMCPServer::HandleRemoveErrorNodes(const TSharedPtr<FJsonObject>& Params
 FString FMCPServer::HandleClearAnimationBlueprintTags(const TSharedPtr<FJsonObject>& Params)
 {
 	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	bool bRemoveExtension = Params->HasField(TEXT("remove_extension")) ? Params->GetBoolField(TEXT("remove_extension")) : false;
 
 	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
 	if (!Blueprint)
@@ -3908,6 +3922,7 @@ FString FMCPServer::HandleClearAnimationBlueprintTags(const TSharedPtr<FJsonObje
 
 	TSharedPtr<FJsonObject> Data = MakeShareable(new FJsonObject);
 	int32 RemovedCount = 0;
+	int32 ExtensionsRemoved = 0;
 
 	// Find AnimBlueprintExtension_Tag objects
 	TArray<UBlueprintExtension*> ExtensionsToRemove;
@@ -3935,8 +3950,64 @@ FString FMCPServer::HandleClearAnimationBlueprintTags(const TSharedPtr<FJsonObje
 	Data->SetArrayField(TEXT("all_extensions"), ExtArray);
 	Data->SetNumberField(TEXT("tag_extensions_found"), ExtensionsToRemove.Num());
 
-	// Instead of removing the extension (which causes crashes),
-	// we'll try multiple approaches to clear tag references
+	// If remove_extension is true, actually remove the extension from the blueprint
+	if (bRemoveExtension && ExtensionsToRemove.Num() > 0)
+	{
+		AnimBP->Modify();
+
+		// Get direct access to the extensions array via reflection
+		FArrayProperty* ExtensionsProp = FindFProperty<FArrayProperty>(UBlueprint::StaticClass(), TEXT("Extensions"));
+		if (ExtensionsProp)
+		{
+			void* ArrayPtr = ExtensionsProp->ContainerPtrToValuePtr<void>(AnimBP);
+			FScriptArrayHelper ArrayHelper(ExtensionsProp, ArrayPtr);
+
+			// Remove extensions in reverse order to maintain indices
+			for (int32 i = ArrayHelper.Num() - 1; i >= 0; i--)
+			{
+				if (ArrayHelper.IsValidIndex(i))
+				{
+					FObjectProperty* InnerProp = CastField<FObjectProperty>(ExtensionsProp->Inner);
+					if (InnerProp)
+					{
+						UObject* ExtObj = InnerProp->GetObjectPropertyValue(ArrayHelper.GetRawPtr(i));
+						if (ExtObj && ExtObj->GetClass()->GetName().Contains(TEXT("Tag")))
+						{
+							ArrayHelper.RemoveValues(i, 1);
+							ExtensionsRemoved++;
+						}
+					}
+				}
+			}
+		}
+
+		Data->SetNumberField(TEXT("extensions_removed"), ExtensionsRemoved);
+
+		if (ExtensionsRemoved > 0)
+		{
+			AnimBP->MarkPackageDirty();
+
+			// Save immediately
+			UPackage* Package = AnimBP->GetOutermost();
+			FString PackageFilename = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+			FSavePackageArgs SaveArgs;
+			SaveArgs.TopLevelFlags = RF_Standalone;
+			bool bSaved = UPackage::SavePackage(Package, AnimBP, *PackageFilename, SaveArgs);
+
+			if (bSaved)
+			{
+				Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Removed %d tag extension(s) and saved. Restart editor to reload."), ExtensionsRemoved));
+			}
+			else
+			{
+				Data->SetStringField(TEXT("message"), TEXT("Extensions removed but save failed."));
+			}
+
+			return MakeResponse(true, Data);
+		}
+	}
+
+	// Otherwise, just clear the data inside the extensions
 	TArray<FString> FoundProperties;
 
 	for (UBlueprintExtension* Extension : ExtensionsToRemove)
@@ -4048,7 +4119,7 @@ FString FMCPServer::HandleClearAnimationBlueprintTags(const TSharedPtr<FJsonObje
 	}
 	else
 	{
-		Data->SetStringField(TEXT("message"), TEXT("No tag mappings found to clear."));
+		Data->SetStringField(TEXT("message"), TEXT("No tag mappings found to clear. Try with remove_extension: true to fully remove the tag extension."));
 	}
 
 	Data->SetNumberField(TEXT("removed_count"), RemovedCount);
@@ -5067,6 +5138,232 @@ FString FMCPServer::HandleReplaceComponentClass(const TSharedPtr<FJsonObject>& P
 	return MakeResponse(true, Data);
 }
 
+FString FMCPServer::HandleSetBlueprintCDOProperty(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return MakeError(TEXT("Missing parameters"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString PropertyName = Params->GetStringField(TEXT("property_name"));
+	FString PropertyValue = Params->GetStringField(TEXT("property_value"));
+
+	if (BlueprintPath.IsEmpty() || PropertyName.IsEmpty())
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path or property_name"));
+	}
+
+	// Load the blueprint
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// Get the generated class and its CDO
+	UClass* GeneratedClass = Blueprint->GeneratedClass;
+	if (!GeneratedClass)
+	{
+		return MakeError(TEXT("Blueprint has no generated class"));
+	}
+
+	UObject* CDO = GeneratedClass->GetDefaultObject();
+	if (!CDO)
+	{
+		return MakeError(TEXT("Failed to get class default object"));
+	}
+
+	// Find the property (search through entire class hierarchy including inherited properties)
+	FProperty* Property = nullptr;
+	for (TFieldIterator<FProperty> PropIt(GeneratedClass); PropIt; ++PropIt)
+	{
+		if (PropIt->GetName() == PropertyName)
+		{
+			Property = *PropIt;
+			break;
+		}
+	}
+
+	if (!Property)
+	{
+		// Also try FindPropertyByName as fallback
+		Property = GeneratedClass->FindPropertyByName(*PropertyName);
+	}
+
+	if (!Property)
+	{
+		return MakeError(FString::Printf(TEXT("Property not found: %s"), *PropertyName));
+	}
+
+	// Mark for modification
+	Blueprint->Modify();
+	CDO->Modify();
+
+	// Handle different property types
+	void* ValuePtr = Property->ContainerPtrToValuePtr<void>(CDO);
+
+	// Handle object property (TObjectPtr<>, UObject*, etc.)
+	if (FObjectProperty* ObjectProp = CastField<FObjectProperty>(Property))
+	{
+		if (PropertyValue.IsEmpty() || PropertyValue.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+		{
+			// Clear the property
+			ObjectProp->SetObjectPropertyValue(ValuePtr, nullptr);
+		}
+		else
+		{
+			// Load the object from the path
+			UObject* ObjectValue = LoadObject<UObject>(nullptr, *PropertyValue);
+			if (!ObjectValue)
+			{
+				// Try adding the asset name suffix (e.g., /Game/Input/IA_Sprint -> /Game/Input/IA_Sprint.IA_Sprint)
+				FString AssetPath = PropertyValue;
+				if (!AssetPath.Contains(TEXT(".")))
+				{
+					FString AssetName = FPaths::GetBaseFilename(AssetPath);
+					AssetPath = AssetPath + TEXT(".") + AssetName;
+				}
+				ObjectValue = LoadObject<UObject>(nullptr, *AssetPath);
+			}
+
+			if (!ObjectValue)
+			{
+				return MakeError(FString::Printf(TEXT("Could not load object: %s"), *PropertyValue));
+			}
+
+			// Verify type compatibility
+			if (!ObjectValue->IsA(ObjectProp->PropertyClass))
+			{
+				return MakeError(FString::Printf(TEXT("Object %s is not compatible with property type %s"),
+					*ObjectValue->GetClass()->GetName(), *ObjectProp->PropertyClass->GetName()));
+			}
+
+			ObjectProp->SetObjectPropertyValue(ValuePtr, ObjectValue);
+		}
+	}
+	// Handle soft object property (TSoftObjectPtr<>)
+	else if (FSoftObjectProperty* SoftObjectProp = CastField<FSoftObjectProperty>(Property))
+	{
+		if (PropertyValue.IsEmpty() || PropertyValue.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+		{
+			FSoftObjectPtr NullPtr;
+			SoftObjectProp->SetPropertyValue(ValuePtr, NullPtr);
+		}
+		else
+		{
+			FSoftObjectPath SoftPath(PropertyValue);
+			FSoftObjectPtr SoftPtr(SoftPath);
+			SoftObjectProp->SetPropertyValue(ValuePtr, SoftPtr);
+		}
+	}
+	// Handle class property (TSubclassOf<>)
+	else if (FClassProperty* ClassProp = CastField<FClassProperty>(Property))
+	{
+		if (PropertyValue.IsEmpty() || PropertyValue.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+		{
+			ClassProp->SetObjectPropertyValue(ValuePtr, nullptr);
+		}
+		else
+		{
+			UClass* ClassValue = LoadClass<UObject>(nullptr, *PropertyValue);
+			if (!ClassValue)
+			{
+				return MakeError(FString::Printf(TEXT("Could not load class: %s"), *PropertyValue));
+			}
+
+			if (!ClassValue->IsChildOf(ClassProp->MetaClass))
+			{
+				return MakeError(FString::Printf(TEXT("Class %s is not compatible with metaclass %s"),
+					*ClassValue->GetName(), *ClassProp->MetaClass->GetName()));
+			}
+
+			ClassProp->SetObjectPropertyValue(ValuePtr, ClassValue);
+		}
+	}
+	// Handle basic types through text import
+	else
+	{
+		const TCHAR* ImportBuffer = *PropertyValue;
+		Property->ImportText_Direct(ImportBuffer, ValuePtr, CDO, PPF_None);
+	}
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+	Blueprint->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Property %s set successfully"), *PropertyName));
+	Data->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+	Data->SetStringField(TEXT("property_name"), PropertyName);
+	Data->SetStringField(TEXT("property_value"), PropertyValue);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleRemoveImplementedInterface(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return MakeError(TEXT("Missing parameters"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString InterfaceName = Params->GetStringField(TEXT("interface_name"));
+
+	if (BlueprintPath.IsEmpty() || InterfaceName.IsEmpty())
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path or interface_name"));
+	}
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+	}
+
+	// Find and remove the implemented interface
+	int32 RemovedCount = 0;
+	for (int32 i = Blueprint->ImplementedInterfaces.Num() - 1; i >= 0; i--)
+	{
+		FBPInterfaceDescription& Interface = Blueprint->ImplementedInterfaces[i];
+		if (Interface.Interface)
+		{
+			FString ClassName = Interface.Interface->GetName();
+			if (ClassName.Contains(InterfaceName))
+			{
+				// Remove any graphs associated with this interface
+				for (UEdGraph* Graph : Interface.Graphs)
+				{
+					if (Graph)
+					{
+						FBlueprintEditorUtils::RemoveGraph(Blueprint, Graph);
+					}
+				}
+				Blueprint->ImplementedInterfaces.RemoveAt(i);
+				RemovedCount++;
+			}
+		}
+	}
+
+	if (RemovedCount == 0)
+	{
+		return MakeError(FString::Printf(TEXT("Interface '%s' not found in blueprint"), *InterfaceName));
+	}
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	Blueprint->MarkPackageDirty();
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Removed %d interface(s) matching '%s'"), RemovedCount, *InterfaceName));
+	Data->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+	Data->SetNumberField(TEXT("interfaces_removed"), RemovedCount);
+	Data->SetNumberField(TEXT("remaining_interfaces"), Blueprint->ImplementedInterfaces.Num());
+
+	return MakeResponse(true, Data);
+}
+
 FString FMCPServer::HandleFindActorsByName(const TSharedPtr<FJsonObject>& Params)
 {
 	FString NamePattern = Params->GetStringField(TEXT("name_pattern"));
@@ -5306,4 +5603,199 @@ FString FMCPServer::HandleGetSceneSummary(const TSharedPtr<FJsonObject>& Params)
 	}
 
 	return MakeResponse(true, ResponseData);
+}
+
+// ==================================================
+// Sprint 5: Blueprint Node Manipulation Commands
+// ==================================================
+
+FString FMCPServer::HandleConnectNodes(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) ||
+		!Params->HasField(TEXT("source_node_id")) || !Params->HasField(TEXT("source_pin")) ||
+		!Params->HasField(TEXT("target_node_id")) || !Params->HasField(TEXT("target_pin")))
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path, source_node_id, source_pin, target_node_id, target_pin"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString SourceNodeId = Params->GetStringField(TEXT("source_node_id"));
+	FString SourcePinName = Params->GetStringField(TEXT("source_pin"));
+	FString TargetNodeId = Params->GetStringField(TEXT("target_node_id"));
+	FString TargetPinName = Params->GetStringField(TEXT("target_pin"));
+	FString GraphName = Params->HasField(TEXT("graph_name")) ? Params->GetStringField(TEXT("graph_name")) : TEXT("EventGraph");
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+	}
+
+	// Find the target graph
+	UEdGraph* TargetGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->UbergraphPages)
+	{
+		if (Graph && Graph->GetName() == GraphName)
+		{
+			TargetGraph = Graph;
+			break;
+		}
+	}
+
+	// Also check function graphs if not found in ubergraph
+	if (!TargetGraph)
+	{
+		for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+		{
+			if (Graph && Graph->GetName() == GraphName)
+			{
+				TargetGraph = Graph;
+				break;
+			}
+		}
+	}
+
+	if (!TargetGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
+	}
+
+	// Find source and target nodes by GUID
+	UEdGraphNode* SourceNode = nullptr;
+	UEdGraphNode* TargetNode = nullptr;
+	FGuid SourceGuid, TargetGuid;
+
+	if (!FGuid::Parse(SourceNodeId, SourceGuid))
+	{
+		return MakeError(FString::Printf(TEXT("Invalid source node ID format: %s"), *SourceNodeId));
+	}
+	if (!FGuid::Parse(TargetNodeId, TargetGuid))
+	{
+		return MakeError(FString::Printf(TEXT("Invalid target node ID format: %s"), *TargetNodeId));
+	}
+
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (Node)
+		{
+			if (Node->NodeGuid == SourceGuid)
+			{
+				SourceNode = Node;
+			}
+			if (Node->NodeGuid == TargetGuid)
+			{
+				TargetNode = Node;
+			}
+		}
+	}
+
+	if (!SourceNode)
+	{
+		return MakeError(FString::Printf(TEXT("Source node not found with ID: %s"), *SourceNodeId));
+	}
+	if (!TargetNode)
+	{
+		return MakeError(FString::Printf(TEXT("Target node not found with ID: %s"), *TargetNodeId));
+	}
+
+	// Find source and target pins
+	UEdGraphPin* SourcePin = nullptr;
+	UEdGraphPin* TargetPin = nullptr;
+
+	for (UEdGraphPin* Pin : SourceNode->Pins)
+	{
+		if (Pin && Pin->PinName.ToString() == SourcePinName && Pin->Direction == EGPD_Output)
+		{
+			SourcePin = Pin;
+			break;
+		}
+	}
+
+	for (UEdGraphPin* Pin : TargetNode->Pins)
+	{
+		if (Pin && Pin->PinName.ToString() == TargetPinName && Pin->Direction == EGPD_Input)
+		{
+			TargetPin = Pin;
+			break;
+		}
+	}
+
+	if (!SourcePin)
+	{
+		// List available output pins for debugging
+		TArray<FString> AvailablePins;
+		for (UEdGraphPin* Pin : SourceNode->Pins)
+		{
+			if (Pin && Pin->Direction == EGPD_Output)
+			{
+				AvailablePins.Add(Pin->PinName.ToString());
+			}
+		}
+		return MakeError(FString::Printf(TEXT("Source output pin not found: %s. Available output pins: %s"),
+			*SourcePinName, *FString::Join(AvailablePins, TEXT(", "))));
+	}
+
+	if (!TargetPin)
+	{
+		// List available input pins for debugging
+		TArray<FString> AvailablePins;
+		for (UEdGraphPin* Pin : TargetNode->Pins)
+		{
+			if (Pin && Pin->Direction == EGPD_Input)
+			{
+				AvailablePins.Add(Pin->PinName.ToString());
+			}
+		}
+		return MakeError(FString::Printf(TEXT("Target input pin not found: %s. Available input pins: %s"),
+			*TargetPinName, *FString::Join(AvailablePins, TEXT(", "))));
+	}
+
+	// Check if connection can be made using the schema
+	const UEdGraphSchema* Schema = TargetGraph->GetSchema();
+	if (Schema)
+	{
+		FPinConnectionResponse Response = Schema->CanCreateConnection(SourcePin, TargetPin);
+		if (Response.Response == CONNECT_RESPONSE_DISALLOW)
+		{
+			return MakeError(FString::Printf(TEXT("Cannot create connection: %s"), *Response.Message.ToString()));
+		}
+	}
+
+	// Check if already connected
+	if (SourcePin->LinkedTo.Contains(TargetPin))
+	{
+		TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+		Data->SetStringField(TEXT("message"), TEXT("Pins are already connected"));
+		Data->SetBoolField(TEXT("already_connected"), true);
+		return MakeResponse(true, Data);
+	}
+
+	// Create the connection
+	bool bModified = Schema->TryCreateConnection(SourcePin, TargetPin);
+
+	if (!bModified)
+	{
+		// Fallback to direct link
+		SourcePin->MakeLinkTo(TargetPin);
+		bModified = true;
+	}
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	// Compile the blueprint
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+	// Check for compilation errors
+	bool bCompiledSuccessfully = (Blueprint->Status != BS_Error);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Nodes connected successfully"));
+	Data->SetStringField(TEXT("source_node"), SourceNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+	Data->SetStringField(TEXT("source_pin"), SourcePinName);
+	Data->SetStringField(TEXT("target_node"), TargetNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+	Data->SetStringField(TEXT("target_pin"), TargetPinName);
+	Data->SetBoolField(TEXT("compiled_successfully"), bCompiledSuccessfully);
+
+	return MakeResponse(true, Data);
 }

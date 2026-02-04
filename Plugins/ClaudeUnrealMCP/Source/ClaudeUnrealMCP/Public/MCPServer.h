@@ -82,6 +82,13 @@ private:
 	FString HandleClearComponentMapValueArray(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReplaceComponentClass(const TSharedPtr<FJsonObject>& Params);
 
+	// Blueprint CDO property manipulation (Sprint 4)
+	FString HandleSetBlueprintCDOProperty(const TSharedPtr<FJsonObject>& Params);
+	FString HandleRemoveImplementedInterface(const TSharedPtr<FJsonObject>& Params);
+
+	// Blueprint node manipulation (Sprint 5)
+	FString HandleConnectNodes(const TSharedPtr<FJsonObject>& Params);
+
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));
 	FString MakeError(const FString& Error);

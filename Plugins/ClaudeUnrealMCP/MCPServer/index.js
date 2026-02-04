@@ -837,13 +837,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "clear_animation_blueprint_tags",
-        description: "Remove AnimBlueprintExtension_Tag objects from an animation blueprint to fix 'cannot find referenced node with tag' errors. Use when tagged nodes have been removed but extensions still reference them.",
+        description: "Remove AnimBlueprintExtension_Tag objects from an animation blueprint to fix 'cannot find referenced node with tag' errors. Use when tagged nodes have been removed but extensions still reference them. Use remove_extension: true to completely remove the tag extension (more aggressive fix).",
         inputSchema: {
           type: "object",
           properties: {
             blueprint_path: {
               type: "string",
               description: "Full path to the animation blueprint asset",
+            },
+            remove_extension: {
+              type: "boolean",
+              description: "If true, completely removes the tag extension from the blueprint instead of just clearing its data. Use this for persistent tag errors that don't clear with the default behavior.",
             },
           },
           required: ["blueprint_path"],
@@ -1064,6 +1068,63 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["blueprint_path", "component_name", "new_class"],
+        },
+      },
+      {
+        name: "set_blueprint_cdo_property",
+        description: "Set an object reference property on a blueprint's Class Default Object (CDO). Use this to set TObjectPtr properties like UInputAction or UInputMappingContext that are defined in C++ but need values assigned in the blueprint. This sets properties on the blueprint class itself, not on components.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            property_name: {
+              type: "string",
+              description: "Name of the property to set (e.g., IA_Sprint, IMC_Sandbox)",
+            },
+            property_value: {
+              type: "string",
+              description: "Full asset path of the object to assign (e.g., /Game/Input/IA_Sprint, /Game/Input/IMC_Sandbox)",
+            },
+          },
+          required: ["blueprint_path", "property_name", "property_value"],
+        },
+      },
+      // Sprint 5: Blueprint Node Manipulation
+      {
+        name: "connect_nodes",
+        description: "Connect two nodes in a blueprint graph by wiring an output pin to an input pin. Use this to programmatically wire up blueprint logic. You must first use read_event_graph to get the node IDs and pin names.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            source_node_id: {
+              type: "string",
+              description: "GUID of the source node (from read_event_graph 'id' field)",
+            },
+            source_pin: {
+              type: "string",
+              description: "Name of the output pin on the source node (e.g., 'Triggered', 'ActionValue', 'ReturnValue')",
+            },
+            target_node_id: {
+              type: "string",
+              description: "GUID of the target node (from read_event_graph 'id' field)",
+            },
+            target_pin: {
+              type: "string",
+              description: "Name of the input pin on the target node (e.g., 'execute', 'Condition', 'Value')",
+            },
+            graph_name: {
+              type: "string",
+              description: "Name of the graph to modify (default: 'EventGraph'). Use for function graphs or other named graphs.",
+            },
+          },
+          required: ["blueprint_path", "source_node_id", "source_pin", "target_node_id", "target_pin"],
         },
       },
     ],

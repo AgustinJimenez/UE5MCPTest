@@ -4,6 +4,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
+#include "InputMappingContext.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -18,11 +19,27 @@ APC_Sandbox::APC_Sandbox()
 	CurrentCharacterIndex = 0;
 	TeleportMaxDistance = 5000.0f;
 	CachedControlRotation = FRotator::ZeroRotator;
+
+	// Load default input mapping context
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> IMC_SandboxFinder(TEXT("/Game/Input/IMC_Sandbox"));
+	if (IMC_SandboxFinder.Succeeded())
+	{
+		IMC_Sandbox = IMC_SandboxFinder.Object;
+	}
 }
 
 void APC_Sandbox::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Add IMC_Sandbox mapping context for character controls (Sprint, Walk, Move, etc.)
+	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+	{
+		if (IMC_Sandbox)
+		{
+			Subsystem->AddMappingContext(IMC_Sandbox, 0);
+		}
+	}
 }
 
 void APC_Sandbox::SetupInputComponent()
