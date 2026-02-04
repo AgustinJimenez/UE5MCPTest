@@ -89,6 +89,9 @@ private:
 	// Blueprint node manipulation (Sprint 5)
 	FString HandleConnectNodes(const TSharedPtr<FJsonObject>& Params);
 
+	// Input system reading (Sprint 6)
+	FString HandleReadInputMappingContext(const TSharedPtr<FJsonObject>& Params);
+
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));
 	FString MakeError(const FString& Error);

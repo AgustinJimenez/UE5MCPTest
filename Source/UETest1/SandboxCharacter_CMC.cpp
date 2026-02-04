@@ -14,6 +14,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
+#include "InputMappingContext.h"
 
 ASandboxCharacter_CMC::ASandboxCharacter_CMC()
 {
@@ -74,7 +75,6 @@ void ASandboxCharacter_CMC::BeginPlay()
 			CachedSmartObjectAnimation = Component;
 		}
 	}
-
 }
 
 void ASandboxCharacter_CMC::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -179,20 +179,61 @@ void ASandboxCharacter_CMC::Tick(float DeltaTime)
 	}
 }
 
-// Interface stub implementations (Phase 1)
+// Interface implementations - populate with character's actual components
 FS_CharacterPropertiesForAnimation ASandboxCharacter_CMC::Get_PropertiesForAnimation_Implementation()
 {
-	return FS_CharacterPropertiesForAnimation();
+	FS_CharacterPropertiesForAnimation Props;
+	Props.InputState = CharacterInputState;
+	Props.Gait = Gait;
+	Props.Velocity = GetVelocity();
+	Props.InputAcceleration = GetCharacterMovement() ? GetCharacterMovement()->GetCurrentAcceleration() : FVector::ZeroVector;
+	Props.ActorTransform = GetActorTransform();
+	Props.JustLanded = JustLanded;
+	Props.LandVelocity = LandVelocity;
+	// Determine movement mode from CharacterMovement state
+	if (GetCharacterMovement())
+	{
+		if (GetCharacterMovement()->IsFalling())
+		{
+			Props.MovementMode = E_MovementMode::InAir;
+		}
+		else
+		{
+			Props.MovementMode = E_MovementMode::OnGround;
+		}
+	}
+	return Props;
 }
 
 FS_CharacterPropertiesForCamera ASandboxCharacter_CMC::Get_PropertiesForCamera_Implementation()
 {
-	return FS_CharacterPropertiesForCamera();
+	FS_CharacterPropertiesForCamera Props;
+	Props.CameraStyle = CameraStyle;
+	Props.Gait = Gait;
+	return Props;
 }
 
 FS_CharacterPropertiesForTraversal ASandboxCharacter_CMC::Get_PropertiesForTraversal_Implementation()
 {
-	return FS_CharacterPropertiesForTraversal();
+	FS_CharacterPropertiesForTraversal Props;
+	Props.Capsule = GetCapsuleComponent();
+	Props.Mesh = GetMesh();
+	Props.MotionWarping = CachedMotionWarping;
+	// Determine movement mode from CharacterMovement state
+	if (GetCharacterMovement())
+	{
+		if (GetCharacterMovement()->IsFalling())
+		{
+			Props.MovementMode = E_MovementMode::InAir;
+		}
+		else
+		{
+			Props.MovementMode = E_MovementMode::OnGround;
+		}
+	}
+	Props.Gait = Gait;
+	Props.Speed = GetVelocity().Size();
+	return Props;
 }
 
 void ASandboxCharacter_CMC::Set_CharacterInputState_Implementation(FS_PlayerInputState DesiredInputState)

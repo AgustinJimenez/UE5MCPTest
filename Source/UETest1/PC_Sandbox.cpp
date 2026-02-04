@@ -20,25 +20,41 @@ APC_Sandbox::APC_Sandbox()
 	TeleportMaxDistance = 5000.0f;
 	CachedControlRotation = FRotator::ZeroRotator;
 
-	// Load default input mapping context
-	static ConstructorHelpers::FObjectFinder<UInputMappingContext> IMC_SandboxFinder(TEXT("/Game/Input/IMC_Sandbox"));
-	if (IMC_SandboxFinder.Succeeded())
-	{
-		IMC_Sandbox = IMC_SandboxFinder.Object;
-	}
+	// Note: IMC_Sandbox is loaded at BeginPlay, not in constructor
+	// ConstructorHelpers can fail for game content that loads asynchronously
 }
 
 void APC_Sandbox::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Add IMC_Sandbox mapping context for character controls (Sprint, Walk, Move, etc.)
-	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+	// Load IMC_Sandbox at runtime if not already set
+	if (!IMC_Sandbox)
 	{
-		if (IMC_Sandbox)
+		IMC_Sandbox = LoadObject<UInputMappingContext>(nullptr, TEXT("/Game/Input/IMC_Sandbox.IMC_Sandbox"));
+		UE_LOG(LogTemp, Warning, TEXT("PC_Sandbox::BeginPlay - Loaded IMC_Sandbox: %s"), IMC_Sandbox ? TEXT("SUCCESS") : TEXT("FAILED"));
+	}
+
+	// Add IMC_Sandbox mapping context for character controls (Sprint, Walk, Move, etc.)
+	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	if (LocalPlayer)
+	{
+		UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer);
+		if (Subsystem && IMC_Sandbox)
 		{
 			Subsystem->AddMappingContext(IMC_Sandbox, 0);
+			UE_LOG(LogTemp, Warning, TEXT("PC_Sandbox::BeginPlay - Added IMC_Sandbox mapping context with priority 0"));
 		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("PC_Sandbox::BeginPlay - Subsystem=%s, IMC_Sandbox=%s"),
+				Subsystem ? TEXT("valid") : TEXT("NULL"),
+				IMC_Sandbox ? TEXT("valid") : TEXT("NULL"));
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("PC_Sandbox::BeginPlay - LocalPlayer is NULL!"));
 	}
 }
 

@@ -1127,6 +1127,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["blueprint_path", "source_node_id", "source_pin", "target_node_id", "target_pin"],
         },
       },
+      // Sprint 6: Input System Reading
+      {
+        name: "read_input_mapping_context",
+        description: "Read the contents of an Input Mapping Context asset, including all input action mappings with their keys, modifiers, and triggers. Use this to inspect what keys are bound to which input actions.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Full path to the Input Mapping Context asset (e.g., '/Game/Input/IMC_Sandbox')",
+            },
+          },
+          required: ["path"],
+        },
+      },
     ],
   };
 });

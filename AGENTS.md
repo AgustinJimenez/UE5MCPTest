@@ -6,6 +6,26 @@ This file provides guidance to AI coding assistants when working with code in th
 
 This is an Unreal Engine 5.7 animation and locomotion showcase project with both Blueprints and C++ code.
 
+## Reference Projects and Backups
+
+**Original Sample Project (for reference):**
+```
+E:\repo\unreal_engine\GameAnimationSample\
+```
+This is the original Epic Games Animation Sample project. Use it to check original blueprint configurations, input mappings, and default values when debugging issues after C++ conversions.
+
+Key reference files:
+- `Content/Blueprints/GM_Sandbox.uasset` - Original GameMode blueprint
+- `Content/Blueprints/PC_Sandbox.uasset` - Original PlayerController blueprint
+- `Content/Input/IMC_Sandbox.uasset` - Input Mapping Context with key bindings
+- `Content/Blueprints/SandboxCharacter_CMC.uasset` - Original character blueprint
+
+**Backup Folder:**
+```
+E:\repo\unreal_engine\backup\
+```
+Contains snapshots of Content folder from various points in development.
+
 ## Development Commands
 
 Open project in Unreal Editor:
@@ -568,3 +588,80 @@ if (CachedStaticMesh && !DynamicMaterial)
 - [ ] Implement Sprint 3: Graph analysis
 - [ ] Convert blueprints to C++ using incremental approach (data types first, then logic)
 - [ ] Consider converting enums (E_MovementMode, E_Gait, E_Stance, etc.) to C++ as foundation for further conversion
+- [ ] **CRITICAL**: Resolve Blueprint vs C++ struct/interface type mismatch before any character class migration
+
+---
+
+## Known Issue: Blueprint vs C++ Interface/Struct Type Mismatch
+
+### Problem Summary
+The project has **duplicate interface and struct definitions** - one set in Blueprints and one in C++:
+
+| Blueprint Asset (S_ prefix) | C++ Definition (FS_ prefix) |
+|----------------------------|----------------------------|
+| `S_PlayerInputState` | `FS_PlayerInputState` |
+| `S_CharacterPropertiesForAnimation` | `FS_CharacterPropertiesForAnimation` |
+| `S_CharacterPropertiesForCamera` | `FS_CharacterPropertiesForCamera` |
+| `S_CharacterPropertiesForTraversal` | `FS_CharacterPropertiesForTraversal` |
+| `BPI_SandboxCharacter_Pawn` (BP asset) | `IBPI_SandboxCharacter_Pawn` (C++ class) |
+
+### Why This Causes Problems
+When `SandboxCharacter_CMC` blueprint is reparented to C++ class `ASandboxCharacter_CMC`:
+1. The C++ class implements `IBPI_SandboxCharacter_Pawn` returning `FS_` structs
+2. But blueprints like `AC_TraversalLogic` call the BP interface expecting `S_` structs
+3. Unreal treats these as **completely different types** even if fields are identical
+4. Result: "Accessed None" runtime errors and "Only exactly matching structures are considered compatible" compile errors
+
+### Error Messages Seen
+```
+Blueprint Runtime Error: "Accessed None trying to read (real) property Capsule_21_D1F3797D47A5FB49C3DFAE8FAB15AFCC in not an UClass"
+Can't connect pins: Only exactly matching structures are considered compatible
+```
+
+### Files Involved
+- **Blueprint Structs**: `Content/Blueprints/Data/S_*.uasset`
+- **Blueprint Interface**: `Content/Blueprints/BPI_SandboxCharacter_Pawn.uasset`
+- **C++ Structs**: `Source/UETest1/CharacterPropertiesStructs.h`
+- **C++ Interface**: `Source/UETest1/BPI_SandboxCharacter_Pawn.h`
+- **Affected Blueprints**: AC_TraversalLogic, SandboxCharacter_CMC, SandboxCharacter_Mover, and any BP using these interfaces
+
+### Research Links
+- [Epic Forums: "Only exactly matching structures are considered compatible"](https://forums.unrealengine.com/t/only-exactly-matching-structures-are-considered-compatible-error/144342)
+- [Epic Docs: Interfaces in Unreal Engine](https://dev.epicgames.com/documentation/en-us/unreal-engine/interfaces-in-unreal-engine)
+- [Epic Docs: Blueprint vs C++](https://dev.epicgames.com/documentation/en-us/unreal-engine/coding-in-unreal-engine-blueprint-vs-cplusplus)
+- [Epic Forums: C++ Interface implemented in BP is null](https://forums.unrealengine.com/t/c-interface-implemented-in-bp-is-null/491758)
+
+### Key Insights from Research
+1. **Blueprint interfaces ≠ C++ interfaces**: They are separate systems. `Cast<>` returns null for BP-implemented interfaces
+2. **Use `TScriptInterface<>`**: For C++ code that needs to work with BP interfaces
+3. **Use `Implements<UInterface>()`**: Instead of `Cast<IInterface>()` when checking BP implementations
+4. **Struct compatibility is strict**: Even identical fields won't match if defined separately
+
+### Migration Options (in order of preference)
+
+**Option 1: Delete Blueprint Definitions, Use C++ Only**
+1. Delete all `S_` blueprint structs from `Content/Blueprints/Data/`
+2. Delete blueprint interface `BPI_SandboxCharacter_Pawn.uasset`
+3. Update ALL blueprints to use C++ structs (`FS_` prefix) and C++ interface
+4. Use Core Redirects if needed for asset references
+5. Then reparent character blueprints to C++ classes
+
+**Option 2: Keep Blueprint System, Manual Input Config**
+1. Don't reparent SandboxCharacter_CMC to C++
+2. Add input properties (IMC_Sandbox, IA_Sprint, etc.) directly to blueprint
+3. Configure input handling in blueprint Event Graph
+4. Keep existing blueprint interface system
+
+**Option 3: Bridge Both Systems (Complex)**
+1. Have C++ class implement BOTH interfaces
+2. Create adapter functions that convert between struct types
+3. High maintenance burden, not recommended
+
+### Attempted Migration (2026-02-03, Reverted)
+- Deleted 9 conflicting functions from SandboxCharacter_CMC
+- Removed interface implementation from blueprint
+- Reparented blueprint to C++ class
+- Set input properties via new MCP tool
+- Fixed C++ interface implementations
+- **Failed**: Runtime errors in AC_TraversalLogic due to struct type mismatch
+- **Reverted**: Restored SandboxCharacter_CMC.uasset from git

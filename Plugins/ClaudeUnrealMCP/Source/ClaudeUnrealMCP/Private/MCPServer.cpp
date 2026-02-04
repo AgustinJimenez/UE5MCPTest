@@ -507,6 +507,11 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	{
 		return HandleConnectNodes(Params);
 	}
+	// Input system reading (Sprint 6)
+	else if (Command == TEXT("read_input_mapping_context"))
+	{
+		return HandleReadInputMappingContext(Params);
+	}
 
 	return MakeError(FString::Printf(TEXT("Unknown command: %s"), *Command));
 }
@@ -5796,6 +5801,97 @@ FString FMCPServer::HandleConnectNodes(const TSharedPtr<FJsonObject>& Params)
 	Data->SetStringField(TEXT("target_node"), TargetNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
 	Data->SetStringField(TEXT("target_pin"), TargetPinName);
 	Data->SetBoolField(TEXT("compiled_successfully"), bCompiledSuccessfully);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleReadInputMappingContext(const TSharedPtr<FJsonObject>& Params)
+{
+	FString Path = Params->GetStringField(TEXT("path"));
+	if (Path.IsEmpty())
+	{
+		return MakeError(TEXT("Missing 'path' parameter"));
+	}
+
+	// Normalize the path
+	FString FullPath = Path;
+	if (!FullPath.StartsWith(TEXT("/")))
+	{
+		FullPath = TEXT("/Game/") + Path;
+	}
+
+	// Load the Input Mapping Context
+	UInputMappingContext* IMC = LoadObject<UInputMappingContext>(nullptr, *FullPath);
+	if (!IMC)
+	{
+		// Try with .IMC_Sandbox suffix
+		FString AssetName = FPaths::GetBaseFilename(FullPath);
+		FString TryPath = FullPath + TEXT(".") + AssetName;
+		IMC = LoadObject<UInputMappingContext>(nullptr, *TryPath);
+	}
+
+	if (!IMC)
+	{
+		return MakeError(FString::Printf(TEXT("Input Mapping Context not found: %s"), *Path));
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("name"), IMC->GetName());
+	Data->SetStringField(TEXT("path"), IMC->GetPathName());
+
+	// Get the mappings
+	TArray<TSharedPtr<FJsonValue>> MappingsArray;
+	const TArray<FEnhancedActionKeyMapping>& Mappings = IMC->GetMappings();
+
+	for (const FEnhancedActionKeyMapping& Mapping : Mappings)
+	{
+		TSharedPtr<FJsonObject> MappingObj = MakeShared<FJsonObject>();
+
+		// Input Action info
+		if (Mapping.Action)
+		{
+			MappingObj->SetStringField(TEXT("action_name"), Mapping.Action->GetName());
+			MappingObj->SetStringField(TEXT("action_path"), Mapping.Action->GetPathName());
+		}
+		else
+		{
+			MappingObj->SetStringField(TEXT("action_name"), TEXT("(None)"));
+		}
+
+		// Key info
+		MappingObj->SetStringField(TEXT("key"), Mapping.Key.GetFName().ToString());
+		MappingObj->SetStringField(TEXT("key_display"), Mapping.Key.GetDisplayName().ToString());
+
+		// Modifiers
+		TArray<TSharedPtr<FJsonValue>> ModifiersArray;
+		for (UInputModifier* Modifier : Mapping.Modifiers)
+		{
+			if (Modifier)
+			{
+				TSharedPtr<FJsonObject> ModObj = MakeShared<FJsonObject>();
+				ModObj->SetStringField(TEXT("class"), Modifier->GetClass()->GetName());
+				ModifiersArray.Add(MakeShared<FJsonValueObject>(ModObj));
+			}
+		}
+		MappingObj->SetArrayField(TEXT("modifiers"), ModifiersArray);
+
+		// Triggers
+		TArray<TSharedPtr<FJsonValue>> TriggersArray;
+		for (UInputTrigger* Trigger : Mapping.Triggers)
+		{
+			if (Trigger)
+			{
+				TSharedPtr<FJsonObject> TrigObj = MakeShared<FJsonObject>();
+				TrigObj->SetStringField(TEXT("class"), Trigger->GetClass()->GetName());
+				TriggersArray.Add(MakeShared<FJsonValueObject>(TrigObj));
+			}
+		}
+		MappingObj->SetArrayField(TEXT("triggers"), TriggersArray);
+
+		MappingsArray.Add(MakeShared<FJsonValueObject>(MappingObj));
+	}
+
+	Data->SetArrayField(TEXT("mappings"), MappingsArray);
 
 	return MakeResponse(true, Data);
 }

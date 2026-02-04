@@ -4,7 +4,49 @@ Goal: convert Blueprints to C++ in order from easiest to hardest.
 
 ---
 
-## CURRENT STATUS SUMMARY (2026-02-03 - Session 3)
+## CURRENT STATUS SUMMARY (2026-02-03 - Session 4)
+
+**All 110 blueprints compile with 0 errors. Play in Editor functional but Sprint feature not working.**
+
+### Current Task: SandboxCharacter_CMC C++ Migration
+
+**⚠️ REVERTED: SandboxCharacter_CMC C++ Migration - Type Mismatch Issue**
+
+**Problem Discovered**: There are TWO separate interface systems:
+1. **Blueprint Interface**: `/Game/Blueprints/BPI_SandboxCharacter_Pawn` uses `S_` prefixed structs (blueprint-defined)
+2. **C++ Interface**: `IBPI_SandboxCharacter_Pawn` uses `FS_` prefixed structs (C++-defined)
+
+When reparenting SandboxCharacter_CMC to the C++ class:
+- The character implements the C++ interface with `FS_` structs
+- But AC_TraversalLogic and other blueprints call the blueprint interface expecting `S_` structs
+- This causes "Accessed None" runtime errors because struct types don't match
+
+**What was attempted**:
+1. Deleted 9 conflicting blueprint functions
+2. Removed interface implementation
+3. Reparented blueprint to C++ class
+4. Set input properties via new MCP tool
+5. Fixed interface implementations to return component references
+
+**Result**: Runtime errors in AC_TraversalLogic due to struct type mismatch
+
+**Reverted**: SandboxCharacter_CMC.uasset and IMC_Sandbox.uasset restored from git
+
+**New MCP Tools Added** (kept):
+1. `set_blueprint_cdo_property` - Sets object reference properties on blueprint CDOs
+2. `remove_implemented_interface` - Removes interface implementations from blueprints
+
+**Proper Migration Path** (future work):
+1. Delete blueprint structs (S_CharacterPropertiesForAnimation, S_CharacterPropertiesForCamera, S_CharacterPropertiesForTraversal, S_PlayerInputState)
+2. Delete blueprint interface (BPI_SandboxCharacter_Pawn)
+3. Update ALL blueprints that use these structs to use C++ structs (FS_ prefix)
+4. Then reparent SandboxCharacter_CMC to C++ class
+
+**Reference**: GameAnimationSample backup at `E:\repo\unreal_engine\GameAnimationSample`
+
+---
+
+## PREVIOUS STATUS SUMMARY (2026-02-03 - Session 3)
 
 **All 110 blueprints compile with 0 errors. Play in Editor fully functional.**
 
