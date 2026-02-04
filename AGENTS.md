@@ -28,6 +28,34 @@ Contains snapshots of Content folder from various points in development.
 
 ## Development Commands
 
+### NPM Scripts (Recommended)
+
+The project has npm scripts for common operations. Run from project root:
+
+```bash
+# Open project in Unreal Editor
+npm run open:ue                # macOS
+# Windows: Use restart:ue:win (no separate open script)
+
+# Restart Unreal Editor (kills existing process, reopens project)
+npm run restart:ue:macos       # macOS
+npm run restart:ue:win         # Windows
+
+# Clean build artifacts (removes .vs, Binaries, Intermediate, Saved folders)
+npm run clean:macos            # macOS
+npm run clean:win              # Windows (also kills UnrealEditor first)
+
+# Rebuild C++ modules
+npm run build:macos            # macOS
+npm run build:win              # Windows
+```
+
+**AI Assistant Note**: Use these npm commands for editor operations:
+- `cd "E:/repo/unreal_engine/UE5MCPTest" && npm run clean:win` - Clean and kill editor
+- `cd "E:/repo/unreal_engine/UE5MCPTest" && npm run restart:ue:win` - Restart editor
+
+### Manual Commands
+
 Open project in Unreal Editor:
 ```bash
 open UETest1.uproject

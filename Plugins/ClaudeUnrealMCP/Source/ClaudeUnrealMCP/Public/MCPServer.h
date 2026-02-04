@@ -88,6 +88,9 @@ private:
 
 	// Blueprint node manipulation (Sprint 5)
 	FString HandleConnectNodes(const TSharedPtr<FJsonObject>& Params);
+	FString HandleDisconnectPin(const TSharedPtr<FJsonObject>& Params);
+	FString HandleAddSetStructNode(const TSharedPtr<FJsonObject>& Params);
+	FString HandleDeleteNode(const TSharedPtr<FJsonObject>& Params);
 
 	// Input system reading (Sprint 6)
 	FString HandleReadInputMappingContext(const TSharedPtr<FJsonObject>& Params);

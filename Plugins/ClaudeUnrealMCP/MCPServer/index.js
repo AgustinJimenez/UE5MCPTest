@@ -1197,6 +1197,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "integer",
               description: "Y position for the node (optional)",
             },
+            fields: {
+              type: "array",
+              items: { type: "string" },
+              description: "Array of struct field names to expose as input pins on the node (e.g., ['WantsToSprint_1_840C190D4B23289C5C46E0B5A4C5C936']). Use read_user_defined_struct to get the full field names with GUIDs.",
+            },
           },
           required: ["blueprint_path", "struct_type"],
         },

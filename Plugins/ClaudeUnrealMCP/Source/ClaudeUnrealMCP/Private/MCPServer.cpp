@@ -24,6 +24,7 @@
 #include "BlueprintEditorLibrary.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
+#include "K2Node_SetFieldsInStruct.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/UserDefinedStruct.h"
 #include "Engine/UserDefinedEnum.h"
@@ -506,6 +507,18 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 	else if (Command == TEXT("connect_nodes"))
 	{
 		return HandleConnectNodes(Params);
+	}
+	else if (Command == TEXT("disconnect_pin"))
+	{
+		return HandleDisconnectPin(Params);
+	}
+	else if (Command == TEXT("add_set_struct_node"))
+	{
+		return HandleAddSetStructNode(Params);
+	}
+	else if (Command == TEXT("delete_node"))
+	{
+		return HandleDeleteNode(Params);
 	}
 	// Input system reading (Sprint 6)
 	else if (Command == TEXT("read_input_mapping_context"))
@@ -5801,6 +5814,316 @@ FString FMCPServer::HandleConnectNodes(const TSharedPtr<FJsonObject>& Params)
 	Data->SetStringField(TEXT("target_node"), TargetNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
 	Data->SetStringField(TEXT("target_pin"), TargetPinName);
 	Data->SetBoolField(TEXT("compiled_successfully"), bCompiledSuccessfully);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleDisconnectPin(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) ||
+		!Params->HasField(TEXT("node_id")) || !Params->HasField(TEXT("pin_name")))
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path, node_id, pin_name"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString NodeId = Params->GetStringField(TEXT("node_id"));
+	FString PinName = Params->GetStringField(TEXT("pin_name"));
+	FString GraphName = Params->HasField(TEXT("graph_name")) ? Params->GetStringField(TEXT("graph_name")) : TEXT("EventGraph");
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+	}
+
+	// Find the target graph
+	UEdGraph* TargetGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->UbergraphPages)
+	{
+		if (Graph && Graph->GetName() == GraphName)
+		{
+			TargetGraph = Graph;
+			break;
+		}
+	}
+
+	if (!TargetGraph)
+	{
+		for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+		{
+			if (Graph && Graph->GetName() == GraphName)
+			{
+				TargetGraph = Graph;
+				break;
+			}
+		}
+	}
+
+	if (!TargetGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
+	}
+
+	// Find node by GUID
+	FGuid NodeGuid;
+	if (!FGuid::Parse(NodeId, NodeGuid))
+	{
+		return MakeError(FString::Printf(TEXT("Invalid node ID format: %s"), *NodeId));
+	}
+
+	UEdGraphNode* Node = nullptr;
+	for (UEdGraphNode* N : TargetGraph->Nodes)
+	{
+		if (N && N->NodeGuid == NodeGuid)
+		{
+			Node = N;
+			break;
+		}
+	}
+
+	if (!Node)
+	{
+		return MakeError(FString::Printf(TEXT("Node not found with ID: %s"), *NodeId));
+	}
+
+	// Find pin
+	UEdGraphPin* Pin = nullptr;
+	for (UEdGraphPin* P : Node->Pins)
+	{
+		if (P && P->PinName.ToString() == PinName)
+		{
+			Pin = P;
+			break;
+		}
+	}
+
+	if (!Pin)
+	{
+		TArray<FString> AvailablePins;
+		for (UEdGraphPin* P : Node->Pins)
+		{
+			if (P)
+			{
+				AvailablePins.Add(P->PinName.ToString());
+			}
+		}
+		return MakeError(FString::Printf(TEXT("Pin not found: %s. Available pins: %s"),
+			*PinName, *FString::Join(AvailablePins, TEXT(", "))));
+	}
+
+	// Break all links
+	int32 LinksCount = Pin->LinkedTo.Num();
+	Pin->BreakAllPinLinks();
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	// Compile the blueprint
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Disconnected %d links from pin"), LinksCount));
+	Data->SetStringField(TEXT("node"), Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+	Data->SetStringField(TEXT("pin"), PinName);
+	Data->SetNumberField(TEXT("links_broken"), LinksCount);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleAddSetStructNode(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) ||
+		!Params->HasField(TEXT("struct_type")))
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path, struct_type"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString StructType = Params->GetStringField(TEXT("struct_type"));
+	FString GraphName = Params->HasField(TEXT("graph_name")) ? Params->GetStringField(TEXT("graph_name")) : TEXT("EventGraph");
+	int32 NodeX = Params->HasField(TEXT("x")) ? Params->GetIntegerField(TEXT("x")) : 0;
+	int32 NodeY = Params->HasField(TEXT("y")) ? Params->GetIntegerField(TEXT("y")) : 0;
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+	}
+
+	// Find the target graph
+	UEdGraph* TargetGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->UbergraphPages)
+	{
+		if (Graph && Graph->GetName() == GraphName)
+		{
+			TargetGraph = Graph;
+			break;
+		}
+	}
+
+	if (!TargetGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
+	}
+
+	// Find the struct type
+	UScriptStruct* Struct = nullptr;
+
+	// Try loading from path first (works for blueprint structs)
+	Struct = LoadObject<UScriptStruct>(nullptr, *StructType);
+
+	if (!Struct)
+	{
+		// Try to find in any package by iterating
+		for (TObjectIterator<UScriptStruct> It; It; ++It)
+		{
+			if (It->GetName() == StructType)
+			{
+				Struct = *It;
+				break;
+			}
+		}
+	}
+
+	if (!Struct)
+	{
+		return MakeError(FString::Printf(TEXT("Struct type not found: %s"), *StructType));
+	}
+
+	// Get fields to expose (optional)
+	TArray<FString> FieldsToExpose;
+	if (Params->HasField(TEXT("fields")))
+	{
+		const TArray<TSharedPtr<FJsonValue>>* FieldsArray;
+		if (Params->TryGetArrayField(TEXT("fields"), FieldsArray))
+		{
+			for (const auto& Field : *FieldsArray)
+			{
+				FieldsToExpose.Add(Field->AsString());
+			}
+		}
+	}
+
+	// Create the node
+	UK2Node_SetFieldsInStruct* NewNode = NewObject<UK2Node_SetFieldsInStruct>(TargetGraph);
+	NewNode->StructType = Struct;
+	NewNode->NodePosX = NodeX;
+	NewNode->NodePosY = NodeY;
+	NewNode->CreateNewGuid();
+
+	// Allocate default pins first (this populates ShowPinForProperties with all fields hidden by default)
+	NewNode->AllocateDefaultPins();
+
+	// Use RestoreAllPins() to show all struct field pins if any fields were requested
+	// This is the official way to expose pins on K2Node_SetFieldsInStruct
+	if (FieldsToExpose.Num() > 0)
+	{
+		// RestoreAllPins() will show all struct member pins
+		NewNode->RestoreAllPins();
+	}
+
+	TargetGraph->AddNode(NewNode, false, false);
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	// Compile the blueprint
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Set struct node created successfully"));
+	Data->SetStringField(TEXT("node_id"), NewNode->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower));
+	Data->SetStringField(TEXT("struct_type"), Struct->GetName());
+
+	// List available pins
+	TArray<TSharedPtr<FJsonValue>> PinsArray;
+	for (UEdGraphPin* Pin : NewNode->Pins)
+	{
+		if (Pin)
+		{
+			TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+			PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+			PinObj->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("Input") : TEXT("Output"));
+			PinsArray.Add(MakeShared<FJsonValueObject>(PinObj));
+		}
+	}
+	Data->SetArrayField(TEXT("pins"), PinsArray);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleDeleteNode(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) ||
+		!Params->HasField(TEXT("node_id")))
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path, node_id"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString NodeId = Params->GetStringField(TEXT("node_id"));
+	FString GraphName = Params->HasField(TEXT("graph_name")) ? Params->GetStringField(TEXT("graph_name")) : TEXT("EventGraph");
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+	}
+
+	// Find the target graph
+	UEdGraph* TargetGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->UbergraphPages)
+	{
+		if (Graph && Graph->GetName() == GraphName)
+		{
+			TargetGraph = Graph;
+			break;
+		}
+	}
+
+	if (!TargetGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
+	}
+
+	// Find the node by GUID
+	UEdGraphNode* NodeToDelete = nullptr;
+	FString NodeTitle;
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (Node)
+		{
+			FString NodeGuidStr = Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensLower);
+			FString NodeGuidStrUpper = Node->NodeGuid.ToString(EGuidFormats::Digits);
+			if (NodeGuidStr.Equals(NodeId, ESearchCase::IgnoreCase) ||
+				NodeGuidStrUpper.Equals(NodeId, ESearchCase::IgnoreCase))
+			{
+				NodeToDelete = Node;
+				NodeTitle = Node->GetNodeTitle(ENodeTitleType::ListView).ToString();
+				break;
+			}
+		}
+	}
+
+	if (!NodeToDelete)
+	{
+		return MakeError(FString::Printf(TEXT("Node not found with ID: %s"), *NodeId));
+	}
+
+	// Remove the node
+	TargetGraph->RemoveNode(NodeToDelete);
+
+	// Mark blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+	// Compile the blueprint
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), TEXT("Node deleted successfully"));
+	Data->SetStringField(TEXT("node_id"), NodeId);
+	Data->SetStringField(TEXT("node_title"), NodeTitle);
 
 	return MakeResponse(true, Data);
 }
