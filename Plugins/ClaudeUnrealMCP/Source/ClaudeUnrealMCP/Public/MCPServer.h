@@ -37,6 +37,8 @@ private:
 	FString HandleReadUserDefinedStruct(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReadUserDefinedEnum(const TSharedPtr<FJsonObject>& Params);
 	FString HandleListActors(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadActorComponents(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReadActorComponentProperties(const TSharedPtr<FJsonObject>& Params);
 	FString HandleFindActorsByName(const TSharedPtr<FJsonObject>& Params);
 	FString HandleGetActorMaterialInfo(const TSharedPtr<FJsonObject>& Params);
 	FString HandleGetSceneSummary(const TSharedPtr<FJsonObject>& Params);
@@ -76,6 +78,7 @@ private:
 	// Level actor property commands (Sprint 2)
 	FString HandleReadActorProperties(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSetActorProperties(const TSharedPtr<FJsonObject>& Params);
+	FString HandleSetActorComponentProperty(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReconstructActor(const TSharedPtr<FJsonObject>& Params);
 
 	// Component map value manipulation (Sprint 3)

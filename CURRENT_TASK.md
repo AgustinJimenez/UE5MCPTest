@@ -6,11 +6,11 @@ Goal: Convert Blueprints to C++ in order from easiest to hardest.
 
 ## CURRENT STATUS (2026-02-03)
 
-**All 110 blueprints compile with 0 errors. Play in Editor functional but Sprint feature not working.**
+**All 110 blueprints compile with 0 errors. Play in Editor functional. Sprint feature restored and working.**
 
-### Known Issue: Sprint Not Working
-- Sprint input action is bound but doesn't affect character movement
-- Needs investigation
+### Resolved: Sprint Not Working (2026-02-04)
+- Sprint input action and movement behavior verified working again
+- No further action required
 
 ---
 
@@ -53,15 +53,17 @@ When `SandboxCharacter_CMC` is reparented to C++:
 ## CONVERSION SUMMARY
 
 ### Successfully Converted (~53 blueprints)
-- Level actors: LevelBlock, LevelVisuals, LevelButton, SpinningArrow, TargetDummy, StillCam
+- Level actors: LevelBlock, LevelBlock_Traversable, LevelVisuals, LevelButton, SpinningArrow, TargetDummy, StillCam
 - Teleporter system: Teleporter_Level, Teleporter_Sender, Teleporter_Destination
 - Characters: BP_Manny, BP_Quinn, BP_Twinblast, BP_UE4_Mannequin, BP_Echo, BP_Walker
 - Controllers: PC_Sandbox, GM_Sandbox, PC_Locomotor, GM_Locomotor
-- Smart Objects: BP_SmartObject_Base, BP_SmartBench
+- Smart Objects: BP_SmartObject_Base, BP_SmartBench, DistanceToSmartObject
 - Movement: BP_MovementMode_Walking, BP_MovementMode_Slide, BP_MovementMode_Falling
 - StateTree: All STT_*, STE_*, STC_* classes
 - AnimNotifies: All BP_AnimNotify_FoleyEvent variants, BP_NotifyState_*
 - Components: AC_FoleyEvents, AC_PreCMCTick, AC_VisualOverrideManager
+- Cameras: CameraDirector_SandboxCharacter
+- PoseSearch Channels: PSC_Traversal_Head, PSC_Traversal_Pos, PSC_DistanceToTraversalObject
 - Interfaces: BPI_SandboxCharacter_ABP, BPI_InteractionTransform, I_FoleyAudioBankInterface
 - Data: BFL_HelpfulFunctions, DABP_FoleyAudioBank
 
