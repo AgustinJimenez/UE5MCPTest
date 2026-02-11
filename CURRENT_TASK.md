@@ -4,13 +4,25 @@ Goal: Convert Blueprints to C++ in order from easiest to hardest.
 
 ---
 
-## CURRENT STATUS (2026-02-03)
+## CURRENT STATUS (2026-02-11)
 
 **All 110 blueprints compile with 0 errors. Play in Editor functional. Sprint feature restored and working.**
 
-### Resolved: Sprint Not Working (2026-02-04)
-- Sprint input action and movement behavior verified working again
-- No further action required
+### MCP Server Refactored (2026-02-05)
+- Extracted tool definitions to `toolDefinitions.js` and Unreal client to `unrealClient.js`
+- C++ side split into `MCPServerCore.cpp` and `MCPServerReadCommands.cpp`
+- Added new tools: `delete_node`, `read_input_mapping_context`, `remove_implemented_interface`
+
+### Traversal Investigation (2026-02-05) — Reverted
+- Investigated ledge grab failure after C++ conversion changes
+- Changes to LevelBlock, LevelBlock_Traversable, and SandboxCharacter_CMC did not fix the issue
+- All traversal-related files restored to original state (see TRAVERSAL_ISSUE_LOG.md)
+
+### Blueprint Conversion Assessment (2026-02-11)
+- Audited all remaining blueprints against existing C++ files
+- Most "small" unconverted assets are **data assets** (PoseSearchSchema, SmartObjectDefinition, CameraAsset, etc.) — already C++ instances with data, not Blueprint classes needing conversion
+- **Only 1 remaining feasible unconverted blueprint**: `STT_PlayAnimMontage`
+- STT_PlayAnimMontage depends on `AC_SmartObjectAnimation_C` (unconverted, too complex)
 
 ---
 
@@ -59,7 +71,7 @@ When `SandboxCharacter_CMC` is reparented to C++:
 - Controllers: PC_Sandbox, GM_Sandbox, PC_Locomotor, GM_Locomotor
 - Smart Objects: BP_SmartObject_Base, BP_SmartBench, DistanceToSmartObject
 - Movement: BP_MovementMode_Walking, BP_MovementMode_Slide, BP_MovementMode_Falling
-- StateTree: All STT_*, STE_*, STC_* classes
+- StateTree: All STT_* (including STT_PlayAnimMontage), STE_*, STC_* classes
 - AnimNotifies: All BP_AnimNotify_FoleyEvent variants, BP_NotifyState_*
 - Components: AC_FoleyEvents, AC_PreCMCTick, AC_VisualOverrideManager
 - Cameras: CameraDirector_SandboxCharacter
@@ -67,7 +79,12 @@ When `SandboxCharacter_CMC` is reparented to C++:
 - Interfaces: BPI_SandboxCharacter_ABP, BPI_InteractionTransform, I_FoleyAudioBankInterface
 - Data: BFL_HelpfulFunctions, DABP_FoleyAudioBank
 
-### Cannot Convert - Too Complex (~5 blueprints)
+### Recently Converted (2026-02-11)
+- **STT_PlayAnimMontage** — StateTree task converted to C++
+  - Uses reflection to call PlayMontage_Multi on AC_SmartObjectAnimation (BP class)
+  - Loads SmartObjectAnimationPayload (BP struct) dynamically via UScriptStruct
+
+### Cannot Convert - Too Complex (~4 blueprints)
 - AC_TraversalLogic (125K chars event graph)
 - STT_FindSmartObject (137K chars)
 - AC_SmartObjectAnimation (111K chars)
