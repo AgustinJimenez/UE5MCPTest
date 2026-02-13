@@ -42,6 +42,40 @@ ASandboxCharacter_CMC::ASandboxCharacter_CMC()
 	LastUpdateVelocity = FVector::ZeroVector;
 	UsingAttributeBasedRootMotion = false;
 	IsRagdolling = false;
+
+	// Load input actions and mapping context
+	static ConstructorHelpers::FObjectFinder<UInputAction> SprintAction(TEXT("/Game/Input/IA_Sprint"));
+	if (SprintAction.Succeeded()) IA_Sprint = SprintAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> MoveAction(TEXT("/Game/Input/IA_Move"));
+	if (MoveAction.Succeeded()) IA_Move = MoveAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> MoveWSAction(TEXT("/Game/Input/IA_Move_WorldSpace"));
+	if (MoveWSAction.Succeeded()) IA_Move_WorldSpace = MoveWSAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> LookAction(TEXT("/Game/Input/IA_Look"));
+	if (LookAction.Succeeded()) IA_Look = LookAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> LookGPAction(TEXT("/Game/Input/IA_Look_Gamepad"));
+	if (LookGPAction.Succeeded()) IA_Look_Gamepad = LookGPAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> WalkAction(TEXT("/Game/Input/IA_Walk"));
+	if (WalkAction.Succeeded()) IA_Walk = WalkAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> JumpAction(TEXT("/Game/Input/IA_Jump"));
+	if (JumpAction.Succeeded()) IA_Jump = JumpAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> CrouchAction(TEXT("/Game/Input/IA_Crouch"));
+	if (CrouchAction.Succeeded()) IA_Crouch = CrouchAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> StrafeAction(TEXT("/Game/Input/IA_Strafe"));
+	if (StrafeAction.Succeeded()) IA_Strafe = StrafeAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputAction> AimAction(TEXT("/Game/Input/IA_Aim"));
+	if (AimAction.Succeeded()) IA_Aim = AimAction.Object;
+
+	static ConstructorHelpers::FObjectFinder<UInputMappingContext> MappingCtx(TEXT("/Game/Input/IMC_Sandbox"));
+	if (MappingCtx.Succeeded()) IMC_Sandbox = MappingCtx.Object;
 }
 
 void ASandboxCharacter_CMC::BeginPlay()

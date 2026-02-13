@@ -10,6 +10,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "K2Node_Event.h"
+#include "K2Node_CustomEvent.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_VariableGet.h"
@@ -25,6 +26,12 @@
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
 #include "K2Node_SetFieldsInStruct.h"
+#include "K2Node_BreakStruct.h"
+#include "StructUtils/InstancedStruct.h"
+#include "K2Node_MakeStruct.h"
+#include "K2Node_SwitchEnum.h"
+#include "K2Node_CastByteToEnum.h"
+#include "K2Node_Select.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/UserDefinedStruct.h"
 #include "Engine/UserDefinedEnum.h"
@@ -1063,6 +1070,65 @@ FString FMCPServer::HandleModifyInterfaceFunctionParameter(const TSharedPtr<FJso
 		NewPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
 		NewPinType.PinSubCategoryObject = TBaseStructure<FTransform>::Get();
 	}
+	else if (NewType == TEXT("struct") && Params->HasField(TEXT("struct_type")))
+	{
+		// When new_type is "struct", use struct_type parameter to find the specific struct
+		FString StructTypePath = Params->GetStringField(TEXT("struct_type"));
+		FString StructNameToFind = StructTypePath;
+		UScriptStruct* FoundStruct = nullptr;
+		if (StructTypePath.StartsWith(TEXT("/Script/")))
+		{
+			FString Remainder = StructTypePath.RightChop(8);
+			FString ModuleName;
+			Remainder.Split(TEXT("."), &ModuleName, &StructNameToFind);
+			// Use FindObject first to resolve exact C++ type (avoids BP name collisions)
+			FoundStruct = FindObject<UScriptStruct>(nullptr, *StructTypePath);
+		}
+		if (!FoundStruct)
+		{
+			for (TObjectIterator<UScriptStruct> It; It; ++It)
+			{
+				if (It->GetName() == StructNameToFind)
+				{
+					FoundStruct = *It;
+					break;
+				}
+			}
+		}
+		if (!FoundStruct)
+		{
+			return MakeError(FString::Printf(TEXT("Struct type not found: %s"), *StructTypePath));
+		}
+		NewPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		NewPinType.PinSubCategoryObject = FoundStruct;
+	}
+	else if (NewType == TEXT("enum") && Params->HasField(TEXT("enum_type")))
+	{
+		// When new_type is "enum", use enum_type parameter to find the specific enum
+		FString EnumTypePath = Params->GetStringField(TEXT("enum_type"));
+		FString EnumNameToFind = EnumTypePath;
+		if (EnumTypePath.StartsWith(TEXT("/Script/")))
+		{
+			FString Remainder = EnumTypePath.RightChop(8);
+			FString ModuleName;
+			Remainder.Split(TEXT("."), &ModuleName, &EnumNameToFind);
+		}
+		UEnum* FoundEnum = nullptr;
+		for (TObjectIterator<UEnum> It; It; ++It)
+		{
+			if (It->GetName() == EnumNameToFind)
+			{
+				FoundEnum = *It;
+				break;
+			}
+		}
+		if (!FoundEnum)
+		{
+			return MakeError(FString::Printf(TEXT("Enum type not found: %s"), *EnumTypePath));
+		}
+		NewPinType.PinCategory = UEdGraphSchema_K2::PC_Byte;
+		NewPinType.PinSubCategoryObject = FoundEnum;
+	}
 	else
 	{
 		// Try to load as object type or struct
@@ -1075,17 +1141,27 @@ FString FMCPServer::HandleModifyInterfaceFunctionParameter(const TSharedPtr<FJso
 			FString PathWithoutScript = NewType.RightChop(8);
 			FString ModuleName;
 			PathWithoutScript.Split(TEXT("."), &ModuleName, &TypeNameToFind);
+
+			// For /Script/ paths, use FindObject first to resolve the exact C++ type
+			// This avoids ambiguity when BP UserDefinedStructs share the same name
+			TypeObject = FindObject<UScriptStruct>(nullptr, *NewType);
+			if (!TypeObject)
+			{
+				TypeObject = FindObject<UClass>(nullptr, *NewType);
+			}
 		}
 
-		// Try to find the struct by iterating over all registered UScriptStruct objects
-		// This works even for C++ structs as long as they've been registered at startup
-		for (TObjectIterator<UScriptStruct> It; It; ++It)
+		// Fall back to TObjectIterator name search
+		if (!TypeObject)
 		{
-			UScriptStruct* Struct = *It;
-			if (Struct->GetName() == TypeNameToFind)
+			for (TObjectIterator<UScriptStruct> It; It; ++It)
 			{
-				TypeObject = Struct;
-				break;
+				UScriptStruct* Struct = *It;
+				if (Struct->GetName() == TypeNameToFind)
+				{
+					TypeObject = Struct;
+					break;
+				}
 			}
 		}
 
@@ -1191,8 +1267,9 @@ FString FMCPServer::HandleModifyInterfaceFunctionParameter(const TSharedPtr<FJso
 	// Reconstruct the node to reflect the changes
 	TargetNode->ReconstructNode();
 
-	// Mark the blueprint as modified
+	// Mark the blueprint as modified and compile to update the generated class
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("message"), TEXT("Interface function parameter modified successfully"));
@@ -1464,6 +1541,258 @@ FString FMCPServer::HandleBreakOrphanedPins(const TSharedPtr<FJsonObject>& Param
 	Data->SetNumberField(TEXT("pins_removed"), PinsRemoved);
 
 	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleReconstructNode(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")))
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' parameter"));
+	}
+
+	const FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	const FString NodeGuidStr = Params->HasField(TEXT("node_guid")) ? Params->GetStringField(TEXT("node_guid")) : TEXT("");
+	const FString VariableFilter = Params->HasField(TEXT("variable_name")) ? Params->GetStringField(TEXT("variable_name")) : TEXT("");
+
+	if (NodeGuidStr.IsEmpty() && VariableFilter.IsEmpty())
+	{
+		return MakeError(TEXT("Must provide 'node_guid' or 'variable_name' parameter"));
+	}
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint) return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintPath));
+
+	// Collect all graphs including sub-graphs
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+	TArray<UEdGraph*> ToProcess = AllGraphs;
+	while (ToProcess.Num() > 0)
+	{
+		UEdGraph* G = ToProcess.Pop();
+		for (UEdGraphNode* N : G->Nodes)
+		{
+			if (!N) continue;
+			for (UEdGraph* Sub : N->GetSubGraphs())
+			{
+				if (Sub && !AllGraphs.Contains(Sub))
+				{
+					AllGraphs.Add(Sub);
+					ToProcess.Add(Sub);
+				}
+			}
+		}
+	}
+
+	// Find nodes to reconstruct
+	TArray<UEdGraphNode*> NodesToReconstruct;
+	if (!NodeGuidStr.IsEmpty())
+	{
+		FGuid NodeGuid;
+		if (!FGuid::Parse(NodeGuidStr, NodeGuid))
+		{
+			return MakeError(FString::Printf(TEXT("Invalid GUID: %s"), *NodeGuidStr));
+		}
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (Node && Node->NodeGuid == NodeGuid)
+				{
+					NodesToReconstruct.Add(Node);
+					break;
+				}
+			}
+			if (NodesToReconstruct.Num() > 0) break;
+		}
+	}
+	else if (!VariableFilter.IsEmpty())
+	{
+		// Find all VariableGet/VariableSet nodes for the specified variable that have sub-pins (expanded)
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (!Node) continue;
+				// Check if this is a VariableGet or VariableSet node
+				UK2Node_VariableGet* VarGet = Cast<UK2Node_VariableGet>(Node);
+				UK2Node_VariableSet* VarSet = Cast<UK2Node_VariableSet>(Node);
+				if (!VarGet && !VarSet) continue;
+
+				// Check variable name
+				FName VarName = VarGet ? VarGet->GetVarName() : VarSet->GetVarName();
+				if (VarName.ToString() != VariableFilter) continue;
+
+				// Check if any pin has sub-pins (expanded struct)
+				bool bHasSubPins = false;
+				for (UEdGraphPin* Pin : Node->Pins)
+				{
+					if (Pin && Pin->SubPins.Num() > 0)
+					{
+						bHasSubPins = true;
+						break;
+					}
+				}
+				if (bHasSubPins)
+				{
+					NodesToReconstruct.Add(Node);
+				}
+			}
+		}
+	}
+
+	if (NodesToReconstruct.Num() == 0)
+	{
+		return MakeError(TEXT("No matching nodes found"));
+	}
+
+	// Reconstruct each node
+	int32 TotalRestored = 0;
+	int32 TotalFailed = 0;
+	TArray<TSharedPtr<FJsonValue>> NodeReports;
+
+	struct FSavedConnection
+	{
+		FName PinName;
+		EEdGraphPinDirection Direction;
+		FGuid RemoteNodeGuid;
+		FName RemotePinName;
+	};
+
+	for (UEdGraphNode* TargetNode : NodesToReconstruct)
+	{
+		TArray<FSavedConnection> SavedConnections;
+		for (UEdGraphPin* Pin : TargetNode->Pins)
+		{
+			if (!Pin) continue;
+			for (UEdGraphPin* Linked : Pin->LinkedTo)
+			{
+				if (Linked && Linked->GetOwningNode())
+				{
+					SavedConnections.Add({Pin->PinName, Pin->Direction, Linked->GetOwningNode()->NodeGuid, Linked->PinName});
+				}
+			}
+		}
+
+		// Find which graph this node is in
+		FString GraphName;
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			if (Graph->Nodes.Contains(TargetNode))
+			{
+				GraphName = Graph->GetName();
+				break;
+			}
+		}
+
+		TargetNode->ReconstructNode();
+
+		int32 Restored = 0;
+		int32 Failed = 0;
+		for (const FSavedConnection& Conn : SavedConnections)
+		{
+			UEdGraphPin* OurPin = TargetNode->FindPin(Conn.PinName, Conn.Direction);
+			if (!OurPin) { Failed++; continue; }
+
+			UEdGraphNode* RemoteNode = nullptr;
+			for (UEdGraph* Graph : AllGraphs)
+			{
+				for (UEdGraphNode* Node : Graph->Nodes)
+				{
+					if (Node && Node->NodeGuid == Conn.RemoteNodeGuid)
+					{
+						RemoteNode = Node;
+						break;
+					}
+				}
+				if (RemoteNode) break;
+			}
+			if (!RemoteNode) { Failed++; continue; }
+
+			EEdGraphPinDirection RemoteDir = (Conn.Direction == EGPD_Input) ? EGPD_Output : EGPD_Input;
+			UEdGraphPin* RemotePin = RemoteNode->FindPin(Conn.RemotePinName, RemoteDir);
+			if (!RemotePin) { Failed++; continue; }
+
+			OurPin->MakeLinkTo(RemotePin);
+			Restored++;
+		}
+		TotalRestored += Restored;
+		TotalFailed += Failed;
+
+		TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
+		Report->SetStringField(TEXT("node_guid"), TargetNode->NodeGuid.ToString());
+		Report->SetStringField(TEXT("node_class"), TargetNode->GetClass()->GetName());
+		Report->SetStringField(TEXT("graph"), GraphName);
+		Report->SetNumberField(TEXT("pins_after"), TargetNode->Pins.Num());
+		Report->SetNumberField(TEXT("connections_restored"), Restored);
+		Report->SetNumberField(TEXT("connections_failed"), Failed);
+		NodeReports.Add(MakeShared<FJsonValueObject>(Report));
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Reconstructed %d node(s)"), NodesToReconstruct.Num()));
+	Data->SetNumberField(TEXT("nodes_reconstructed"), NodesToReconstruct.Num());
+	Data->SetNumberField(TEXT("total_connections_restored"), TotalRestored);
+	Data->SetNumberField(TEXT("total_connections_failed"), TotalFailed);
+	Data->SetArrayField(TEXT("nodes"), NodeReports);
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleSetPinDefault(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")))
+		return MakeError(TEXT("Missing 'blueprint_path' parameter"));
+
+	FString BPPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString GraphName = Params->GetStringField(TEXT("graph_name"));
+	FString NodeGuid = Params->GetStringField(TEXT("node_guid"));
+	FString PinName = Params->GetStringField(TEXT("pin_name"));
+	FString NewDefault = Params->GetStringField(TEXT("new_default"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BPPath);
+	if (!Blueprint) return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BPPath));
+
+	// Search all graphs for the node
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (!GraphName.IsEmpty() && Graph->GetName() != GraphName) continue;
+
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			FString GuidStr = Node->NodeGuid.ToString(EGuidFormats::DigitsWithHyphensInBraces);
+			// Also try without braces
+			FString GuidNoBraces = Node->NodeGuid.ToString(EGuidFormats::Digits);
+
+			if (GuidStr != NodeGuid && GuidNoBraces != NodeGuid && Node->NodeGuid.ToString() != NodeGuid)
+				continue;
+
+			// Found the node, find the pin
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin->PinName.ToString() == PinName)
+				{
+					FString OldDefault = Pin->DefaultValue;
+					Pin->DefaultValue = NewDefault;
+
+					FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+					TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+					Data->SetStringField(TEXT("graph"), Graph->GetName());
+					Data->SetStringField(TEXT("node"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+					Data->SetStringField(TEXT("pin"), PinName);
+					Data->SetStringField(TEXT("old_default"), OldDefault);
+					Data->SetStringField(TEXT("new_default"), NewDefault);
+					return MakeResponse(true, Data);
+				}
+			}
+			return MakeError(FString::Printf(TEXT("Pin '%s' not found on node"), *PinName));
+		}
+	}
+	return MakeError(FString::Printf(TEXT("Node with GUID '%s' not found"), *NodeGuid));
 }
 
 FString FMCPServer::HandleDeleteUserDefinedStruct(const TSharedPtr<FJsonObject>& Params)
@@ -4472,6 +4801,2523 @@ FString FMCPServer::HandleReadInputMappingContext(const TSharedPtr<FJsonObject>&
 	}
 
 	Data->SetArrayField(TEXT("mappings"), MappingsArray);
+
+	return MakeResponse(true, Data);
+}
+
+// ===== Sprint 7: Struct Migration =====
+
+struct FSavedPinConnection
+{
+	FName PinName;
+	EEdGraphPinDirection Direction;
+	FGuid RemoteNodeGuid;
+	FName RemotePinName;
+};
+
+static void SaveNodeConnections(UEdGraphNode* Node, TArray<FSavedPinConnection>& OutConnections)
+{
+	for (UEdGraphPin* Pin : Node->Pins)
+	{
+		if (!Pin) continue;
+		for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+		{
+			if (!LinkedPin || !LinkedPin->GetOwningNodeUnchecked()) continue;
+			FSavedPinConnection Conn;
+			Conn.PinName = Pin->PinName;
+			Conn.Direction = Pin->Direction;
+			Conn.RemoteNodeGuid = LinkedPin->GetOwningNode()->NodeGuid;
+			Conn.RemotePinName = LinkedPin->PinName;
+			OutConnections.Add(Conn);
+		}
+	}
+}
+
+static void RestoreNodeConnections(
+	UEdGraphNode* Node,
+	const TArray<FSavedPinConnection>& SavedConnections,
+	const TMap<FName, FName>& FieldNameMap,
+	UEdGraph* Graph)
+{
+	for (const FSavedPinConnection& Conn : SavedConnections)
+	{
+		// Map old GUID-suffixed pin name to clean C++ name
+		FName MappedPinName = Conn.PinName;
+		if (const FName* NewName = FieldNameMap.Find(Conn.PinName))
+		{
+			MappedPinName = *NewName;
+		}
+
+		// Find our pin by mapped name
+		UEdGraphPin* OurPin = Node->FindPin(MappedPinName, Conn.Direction);
+		if (!OurPin)
+		{
+			// Try exact old name (for non-struct pins like exec, struct input/output)
+			OurPin = Node->FindPin(Conn.PinName, Conn.Direction);
+		}
+		if (!OurPin) continue;
+
+		// Find the remote node and pin
+		for (UEdGraphNode* OtherNode : Graph->Nodes)
+		{
+			if (OtherNode && OtherNode->NodeGuid == Conn.RemoteNodeGuid)
+			{
+				EEdGraphPinDirection RemoteDir = (Conn.Direction == EGPD_Input) ? EGPD_Output : EGPD_Input;
+				// Try exact remote pin name first
+				UEdGraphPin* RemotePin = OtherNode->FindPin(Conn.RemotePinName, RemoteDir);
+				if (!RemotePin)
+				{
+					// Remote pin may also have been remapped
+					FName MappedRemoteName = Conn.RemotePinName;
+					if (const FName* NewRemoteName = FieldNameMap.Find(Conn.RemotePinName))
+					{
+						MappedRemoteName = *NewRemoteName;
+					}
+					RemotePin = OtherNode->FindPin(MappedRemoteName, RemoteDir);
+				}
+				if (RemotePin && !OurPin->LinkedTo.Contains(RemotePin))
+				{
+					OurPin->MakeLinkTo(RemotePin);
+				}
+				break;
+			}
+		}
+	}
+}
+
+static bool DoesBlueprintReferenceStruct(UBlueprint* Blueprint, UUserDefinedStruct* OldStruct)
+{
+	// Check variables
+	for (const FBPVariableDescription& Var : Blueprint->NewVariables)
+	{
+		if (Var.VarType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+			Var.VarType.PinSubCategoryObject.Get() == OldStruct)
+		{
+			return true;
+		}
+	}
+
+	// Check graph nodes
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node) continue;
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+					Pin->PinType.PinSubCategoryObject.Get() == OldStruct)
+				{
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("source_struct_path")) || !Params->HasField(TEXT("target_struct_path")))
+	{
+		return MakeError(TEXT("Missing 'source_struct_path' or 'target_struct_path' parameter"));
+	}
+
+	FString SourceStructPath = Params->GetStringField(TEXT("source_struct_path"));
+	FString TargetStructPath = Params->GetStringField(TEXT("target_struct_path"));
+	bool bDryRun = Params->HasField(TEXT("dry_run")) ? Params->GetBoolField(TEXT("dry_run")) : false;
+
+	// Load old BP struct
+	FString FullSourcePath = SourceStructPath;
+	if (!FullSourcePath.EndsWith(FPaths::GetCleanFilename(FullSourcePath)))
+	{
+		FullSourcePath = SourceStructPath + TEXT(".") + FPaths::GetCleanFilename(SourceStructPath);
+	}
+	UUserDefinedStruct* OldStruct = LoadObject<UUserDefinedStruct>(nullptr, *FullSourcePath);
+	if (!OldStruct)
+	{
+		OldStruct = LoadObject<UUserDefinedStruct>(nullptr, *SourceStructPath);
+	}
+	if (!OldStruct)
+	{
+		return MakeError(FString::Printf(TEXT("Source UserDefinedStruct not found at '%s'"), *SourceStructPath));
+	}
+
+	// Load new C++ struct
+	UScriptStruct* NewStruct = nullptr;
+	FString TypeNameToFind = TargetStructPath;
+	if (TargetStructPath.StartsWith(TEXT("/Script/")))
+	{
+		FString Remainder = TargetStructPath;
+		Remainder.RemoveFromStart(TEXT("/Script/"));
+		FString ModuleName;
+		Remainder.Split(TEXT("."), &ModuleName, &TypeNameToFind);
+	}
+	for (TObjectIterator<UScriptStruct> It; It; ++It)
+	{
+		if (It->GetName() == TypeNameToFind)
+		{
+			NewStruct = *It;
+			break;
+		}
+	}
+	if (!NewStruct)
+	{
+		return MakeError(FString::Printf(TEXT("Target C++ struct '%s' not found"), *TargetStructPath));
+	}
+
+	// Build GUID → clean name field mapping
+	TMap<FName, FName> FieldNameMap;
+	TArray<TSharedPtr<FJsonValue>> MappingsJsonArray;
+
+	const TArray<FStructVariableDescription>& VarDescs = FStructureEditorUtils::GetVarDesc(OldStruct);
+	for (const FStructVariableDescription& Desc : VarDescs)
+	{
+		FName OldName = Desc.VarName;
+		FName CleanName = FName(*Desc.FriendlyName);
+		FieldNameMap.Add(OldName, CleanName);
+
+		TSharedPtr<FJsonObject> MapObj = MakeShared<FJsonObject>();
+		MapObj->SetStringField(TEXT("old_name"), OldName.ToString());
+		MapObj->SetStringField(TEXT("new_name"), CleanName.ToString());
+		MappingsJsonArray.Add(MakeShared<FJsonValueObject>(MapObj));
+	}
+
+	// Find all blueprint assets
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+	TArray<FAssetData> AllBPAssets;
+	AssetRegistry.GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), AllBPAssets);
+	TArray<FAssetData> AnimBPAssets;
+	AssetRegistry.GetAssetsByClass(UAnimBlueprint::StaticClass()->GetClassPathName(), AnimBPAssets);
+	AllBPAssets.Append(AnimBPAssets);
+
+	// Find affected blueprints
+	TArray<UBlueprint*> AffectedBlueprints;
+	for (const FAssetData& Asset : AllBPAssets)
+	{
+		FString AssetPath = Asset.GetObjectPathString();
+		if (!AssetPath.StartsWith(TEXT("/Game/"))) continue;
+
+		UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *AssetPath);
+		if (!BP) continue;
+
+		if (DoesBlueprintReferenceStruct(BP, OldStruct))
+		{
+			AffectedBlueprints.Add(BP);
+		}
+	}
+
+	// Migrate each affected blueprint
+	TArray<TSharedPtr<FJsonValue>> BlueprintReportsArray;
+	int32 TotalVariablesMigrated = 0;
+	int32 TotalNodesMigrated = 0;
+	int32 TotalConnectionsRestored = 0;
+	int32 TotalConnectionsFailed = 0;
+
+	for (UBlueprint* Blueprint : AffectedBlueprints)
+	{
+		TSharedPtr<FJsonObject> BPReport = MakeShared<FJsonObject>();
+		BPReport->SetStringField(TEXT("path"), Blueprint->GetPathName());
+		BPReport->SetStringField(TEXT("name"), Blueprint->GetName());
+
+		int32 VarCount = 0;
+		int32 NodeCount = 0;
+
+		// --- Update member variables ---
+		for (FBPVariableDescription& Var : Blueprint->NewVariables)
+		{
+			if (Var.VarType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+				Var.VarType.PinSubCategoryObject.Get() == OldStruct)
+			{
+				VarCount++;
+				if (!bDryRun)
+				{
+					Var.VarType.PinSubCategoryObject = NewStruct;
+				}
+			}
+		}
+
+		// --- Update function-local variables (stored on FunctionEntry nodes) ---
+		{
+			TArray<UEdGraph*> TempGraphs;
+			Blueprint->GetAllGraphs(TempGraphs);
+			for (UEdGraph* Graph : TempGraphs)
+			{
+				for (UEdGraphNode* Node : Graph->Nodes)
+				{
+					UK2Node_FunctionEntry* EntryNode = Cast<UK2Node_FunctionEntry>(Node);
+					if (!EntryNode) continue;
+					for (FBPVariableDescription& LocalVar : EntryNode->LocalVariables)
+					{
+						if (LocalVar.VarType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+							LocalVar.VarType.PinSubCategoryObject.Get() == OldStruct)
+						{
+							VarCount++;
+							if (!bDryRun)
+							{
+								LocalVar.VarType.PinSubCategoryObject = NewStruct;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// --- Collect all affected nodes across all graphs ---
+		struct FNodeMigrationInfo
+		{
+			UEdGraphNode* Node;
+			UEdGraph* Graph;
+			bool bIsStructNode; // Break/Make/Set struct node (needs ReconstructNode)
+			TArray<FSavedPinConnection> SavedConnections;
+		};
+		TArray<FNodeMigrationInfo> NodesToMigrate;
+
+		TArray<UEdGraph*> AllGraphs;
+		Blueprint->GetAllGraphs(AllGraphs);
+
+		// Add sub-graphs recursively (GetAllGraphs may not include node sub-graphs)
+		{
+			TArray<UEdGraph*> GraphsToProcess = AllGraphs;
+			while (GraphsToProcess.Num() > 0)
+			{
+				UEdGraph* CurrentGraph = GraphsToProcess.Pop();
+				for (UEdGraphNode* GraphNode : CurrentGraph->Nodes)
+				{
+					if (!GraphNode) continue;
+					for (UEdGraph* SubGraph : GraphNode->GetSubGraphs())
+					{
+						if (SubGraph && !AllGraphs.Contains(SubGraph))
+						{
+							AllGraphs.Add(SubGraph);
+							GraphsToProcess.Add(SubGraph);
+						}
+					}
+				}
+			}
+		}
+
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (!Node) continue;
+				bool bNodeAffected = false;
+				bool bIsStructNode = false;
+
+				// Check Break/Make/Set struct nodes
+				if (UK2Node_BreakStruct* BreakNode = Cast<UK2Node_BreakStruct>(Node))
+				{
+					if (BreakNode->StructType == OldStruct) { bNodeAffected = true; bIsStructNode = true; }
+				}
+				else if (UK2Node_MakeStruct* MakeNode = Cast<UK2Node_MakeStruct>(Node))
+				{
+					if (MakeNode->StructType == OldStruct) { bNodeAffected = true; bIsStructNode = true; }
+				}
+				else if (UK2Node_SetFieldsInStruct* SetNode = Cast<UK2Node_SetFieldsInStruct>(Node))
+				{
+					if (SetNode->StructType == OldStruct) { bNodeAffected = true; bIsStructNode = true; }
+				}
+				else
+				{
+					// Generic: check any pin referencing old struct
+					for (UEdGraphPin* Pin : Node->Pins)
+					{
+						if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+							Pin->PinType.PinSubCategoryObject.Get() == OldStruct)
+						{
+							bNodeAffected = true;
+							break;
+						}
+					}
+				}
+
+				if (bNodeAffected)
+				{
+					FNodeMigrationInfo Info;
+					Info.Node = Node;
+					Info.Graph = Graph;
+					Info.bIsStructNode = bIsStructNode;
+					SaveNodeConnections(Node, Info.SavedConnections);
+					NodesToMigrate.Add(MoveTemp(Info));
+				}
+			}
+		}
+
+		NodeCount = NodesToMigrate.Num();
+
+		// --- Migrate nodes ---
+		if (!bDryRun)
+		{
+			// Pass 1: Update struct references
+			for (FNodeMigrationInfo& Info : NodesToMigrate)
+			{
+				UEdGraphNode* Node = Info.Node;
+
+				if (Info.bIsStructNode)
+				{
+					// Break/Make/Set nodes: need ReconstructNode to rebuild pins with new field names
+					for (UEdGraphPin* Pin : Node->Pins)
+					{
+						if (Pin) Pin->BreakAllPinLinks();
+					}
+
+					if (UK2Node_BreakStruct* BreakNode = Cast<UK2Node_BreakStruct>(Node))
+					{
+						BreakNode->StructType = NewStruct;
+					}
+					else if (UK2Node_MakeStruct* MakeNode = Cast<UK2Node_MakeStruct>(Node))
+					{
+						MakeNode->StructType = NewStruct;
+					}
+					else if (UK2Node_SetFieldsInStruct* SetNode = Cast<UK2Node_SetFieldsInStruct>(Node))
+					{
+						SetNode->StructType = NewStruct;
+					}
+					Node->ReconstructNode();
+				}
+				else
+				{
+					// Generic nodes: update pin types in-place WITHOUT ReconstructNode
+					// ReconstructNode on generic nodes rebuilds from internal state and reverts our changes
+					for (UEdGraphPin* Pin : Node->Pins)
+					{
+						if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+							Pin->PinType.PinSubCategoryObject.Get() == OldStruct)
+						{
+							Pin->PinType.PinSubCategoryObject = NewStruct;
+						}
+					}
+
+					// Also update K2Node_CustomEvent::UserDefinedPins so ReconstructNode won't revert
+					if (UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Node))
+					{
+						for (TSharedPtr<FUserPinInfo>& PinInfo : CustomEvent->UserDefinedPins)
+						{
+							if (PinInfo.IsValid() &&
+								PinInfo->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+								PinInfo->PinType.PinSubCategoryObject.Get() == OldStruct)
+							{
+								PinInfo->PinType.PinSubCategoryObject = NewStruct;
+							}
+						}
+					}
+				}
+			}
+
+			// Pass 2: Restore connections on struct nodes (generic nodes kept their connections)
+			for (FNodeMigrationInfo& Info : NodesToMigrate)
+			{
+				if (Info.bIsStructNode)
+				{
+					int32 ConnectionsBefore = Info.SavedConnections.Num();
+					RestoreNodeConnections(Info.Node, Info.SavedConnections, FieldNameMap, Info.Graph);
+
+					int32 RestoredCount = 0;
+					for (UEdGraphPin* Pin : Info.Node->Pins)
+					{
+						if (Pin) RestoredCount += Pin->LinkedTo.Num();
+					}
+					TotalConnectionsRestored += RestoredCount;
+					int32 FailedCount = ConnectionsBefore - RestoredCount;
+					if (FailedCount > 0) TotalConnectionsFailed += FailedCount;
+				}
+				else
+				{
+					// Generic nodes kept connections — count them as restored
+					for (UEdGraphPin* Pin : Info.Node->Pins)
+					{
+						if (Pin) TotalConnectionsRestored += Pin->LinkedTo.Num();
+					}
+				}
+			}
+
+			// Finalize
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+		}
+
+		TotalVariablesMigrated += VarCount;
+		TotalNodesMigrated += NodeCount;
+
+		BPReport->SetNumberField(TEXT("variables_migrated"), VarCount);
+		BPReport->SetNumberField(TEXT("nodes_migrated"), NodeCount);
+		BlueprintReportsArray.Add(MakeShared<FJsonValueObject>(BPReport));
+	}
+
+	// Build response
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("dry_run"), bDryRun);
+	Data->SetStringField(TEXT("source_struct"), OldStruct->GetPathName());
+	Data->SetStringField(TEXT("target_struct"), NewStruct->GetPathName());
+	Data->SetNumberField(TEXT("field_mappings_count"), FieldNameMap.Num());
+	Data->SetArrayField(TEXT("field_name_mapping"), MappingsJsonArray);
+	Data->SetNumberField(TEXT("blueprints_affected"), AffectedBlueprints.Num());
+	Data->SetArrayField(TEXT("affected_blueprints"), BlueprintReportsArray);
+	Data->SetNumberField(TEXT("total_variables_migrated"), TotalVariablesMigrated);
+	Data->SetNumberField(TEXT("total_nodes_migrated"), TotalNodesMigrated);
+	if (!bDryRun)
+	{
+		Data->SetNumberField(TEXT("connections_restored"), TotalConnectionsRestored);
+		Data->SetNumberField(TEXT("connections_failed"), TotalConnectionsFailed);
+	}
+	Data->SetStringField(TEXT("message"),
+		bDryRun ? TEXT("Dry run complete - no changes made") : TEXT("Struct migration complete"));
+
+	return MakeResponse(true, Data);
+}
+
+// Helper: Check if a blueprint references a given enum anywhere in its graphs
+static bool DoesBlueprintReferenceEnum(UBlueprint* Blueprint, UEnum* EnumToFind)
+{
+	// Check variables
+	for (const FBPVariableDescription& Var : Blueprint->NewVariables)
+	{
+		if (Var.VarType.PinSubCategoryObject.Get() == EnumToFind)
+			return true;
+	}
+	// Check all graphs including sub-graphs
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+	TArray<UEdGraph*> GraphsToProcess = AllGraphs;
+	while (GraphsToProcess.Num() > 0)
+	{
+		UEdGraph* Graph = GraphsToProcess.Pop();
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node) continue;
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin && Pin->PinType.PinSubCategoryObject.Get() == EnumToFind)
+					return true;
+			}
+			for (UEdGraph* SubGraph : Node->GetSubGraphs())
+			{
+				if (SubGraph && !AllGraphs.Contains(SubGraph))
+				{
+					AllGraphs.Add(SubGraph);
+					GraphsToProcess.Add(SubGraph);
+				}
+			}
+		}
+	}
+	return false;
+}
+
+FString FMCPServer::HandleMigrateEnumReferences(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return MakeError(TEXT("Missing parameters"));
+	}
+
+	FString SourceEnumPath = Params->GetStringField(TEXT("source_enum_path"));
+	FString TargetEnumPath = Params->GetStringField(TEXT("target_enum_path"));
+	bool bDryRun = Params->HasField(TEXT("dry_run")) ? Params->GetBoolField(TEXT("dry_run")) : false;
+
+	if (SourceEnumPath.IsEmpty() || TargetEnumPath.IsEmpty())
+	{
+		return MakeError(TEXT("Missing source_enum_path or target_enum_path"));
+	}
+
+	// Load old enum (UserDefinedEnum)
+	UUserDefinedEnum* OldEnum = LoadObject<UUserDefinedEnum>(nullptr, *SourceEnumPath);
+	if (!OldEnum)
+	{
+		return MakeError(FString::Printf(TEXT("Could not load source UserDefinedEnum: %s"), *SourceEnumPath));
+	}
+
+	// Find new enum (C++ UEnum)
+	UEnum* NewEnum = nullptr;
+	for (TObjectIterator<UEnum> It; It; ++It)
+	{
+		if (It->GetPathName() == TargetEnumPath)
+		{
+			NewEnum = *It;
+			break;
+		}
+	}
+	if (!NewEnum)
+	{
+		return MakeError(FString::Printf(TEXT("Could not find target UEnum: %s"), *TargetEnumPath));
+	}
+
+	// Build value name mapping: BP enum display names -> C++ enum names
+	// BP UserDefinedEnum values have display names like "Walk" and internal names like "E_Gait::NewEnumerator0"
+	// C++ enum has values like "E_Gait::Walk"
+	TMap<FName, FName> ValueNameMap;          // OldInternalName -> NewInternalName
+	TMap<FString, FString> DisplayToNewValue; // DisplayName -> NewInternalName (for default value remapping)
+	TArray<TSharedPtr<FJsonValue>> ValueMappingsArray;
+	for (int32 i = 0; i < OldEnum->NumEnums() - 1; ++i) // -1 to skip _MAX
+	{
+		FText DisplayText = OldEnum->GetDisplayNameTextByIndex(i);
+		FString DisplayName = DisplayText.ToString();
+		FName OldValueName = FName(*OldEnum->GetNameStringByIndex(i));
+
+		// Find matching C++ enum value by display name
+		for (int32 j = 0; j < NewEnum->NumEnums() - 1; ++j)
+		{
+			FString NewDisplayName = NewEnum->GetDisplayNameTextByIndex(j).ToString();
+			if (NewDisplayName == DisplayName)
+			{
+				FName NewValueName = FName(*NewEnum->GetNameStringByIndex(j));
+				ValueNameMap.Add(OldValueName, NewValueName);
+				DisplayToNewValue.Add(DisplayName, NewValueName.ToString());
+
+				TSharedPtr<FJsonObject> Mapping = MakeShared<FJsonObject>();
+				Mapping->SetStringField(TEXT("display_name"), DisplayName);
+				Mapping->SetStringField(TEXT("old_value"), OldValueName.ToString());
+				Mapping->SetStringField(TEXT("new_value"), NewValueName.ToString());
+				ValueMappingsArray.Add(MakeShared<FJsonValueObject>(Mapping));
+				break;
+			}
+		}
+	}
+
+	// --- Phase 0: Update UserDefinedStruct field definitions ---
+	// BP structs may have fields typed as BP enums. Break/Set/Make nodes derive
+	// sub-pin types from the struct definition, so we must update the source.
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+	int32 TotalStructFieldsFixed = 0;
+	TArray<TSharedPtr<FJsonValue>> StructFieldReportsArray;
+	TArray<TSharedPtr<FJsonValue>> StructDiagArray;
+	{
+		TArray<FAssetData> AllStructAssets;
+		AssetRegistry.GetAssetsByClass(UUserDefinedStruct::StaticClass()->GetClassPathName(), AllStructAssets, true);
+
+		FString OldEnumName = OldEnum->GetName();
+
+		for (const FAssetData& StructAssetData : AllStructAssets)
+		{
+			UUserDefinedStruct* UDStruct = Cast<UUserDefinedStruct>(StructAssetData.GetAsset());
+			if (!UDStruct) continue;
+
+			TArray<FStructVariableDescription>& Variables = const_cast<TArray<FStructVariableDescription>&>(
+				FStructureEditorUtils::GetVarDesc(UDStruct)
+			);
+
+			bool bStructModified = false;
+			for (FStructVariableDescription& Variable : Variables)
+			{
+				// Diagnostic: dump ALL fields that have any SubCategoryObject referencing enum name
+				FString SubCatPath = Variable.SubCategoryObject.ToSoftObjectPath().ToString();
+				bool bSubCatMatchesName = SubCatPath.Contains(OldEnumName);
+
+				// Also check the compiled FProperty for this field
+				FString CompiledEnumPath;
+				if (FProperty* Prop = UDStruct->FindPropertyByName(Variable.VarName))
+				{
+					if (FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+					{
+						if (ByteProp->Enum)
+						{
+							CompiledEnumPath = ByteProp->Enum->GetPathName();
+							if (!bSubCatMatchesName && ByteProp->Enum->GetName() == OldEnumName)
+							{
+								bSubCatMatchesName = true; // compiled property references this enum
+							}
+						}
+					}
+					else if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+					{
+						if (EnumProp->GetEnum())
+						{
+							CompiledEnumPath = EnumProp->GetEnum()->GetPathName();
+							if (!bSubCatMatchesName && EnumProp->GetEnum()->GetName() == OldEnumName)
+							{
+								bSubCatMatchesName = true;
+							}
+						}
+					}
+				}
+
+				if (bSubCatMatchesName)
+				{
+					TSharedPtr<FJsonObject> Diag = MakeShared<FJsonObject>();
+					Diag->SetStringField(TEXT("struct"), UDStruct->GetName());
+					Diag->SetStringField(TEXT("field"), Variable.FriendlyName);
+					Diag->SetStringField(TEXT("var_name"), Variable.VarName.ToString());
+					Diag->SetStringField(TEXT("category"), Variable.Category.ToString());
+					Diag->SetStringField(TEXT("sub_category"), Variable.SubCategory.ToString());
+					Diag->SetStringField(TEXT("sub_category_object_path"), SubCatPath);
+					Diag->SetStringField(TEXT("compiled_enum_path"), CompiledEnumPath);
+
+					UObject* ResolvedObj = Variable.SubCategoryObject.LoadSynchronous();
+					Diag->SetStringField(TEXT("resolved_obj"), ResolvedObj ? ResolvedObj->GetPathName() : TEXT("null"));
+					Diag->SetStringField(TEXT("old_enum_path"), OldEnum->GetPathName());
+					Diag->SetBoolField(TEXT("matches_old_enum"), ResolvedObj == OldEnum);
+					Diag->SetStringField(TEXT("resolved_class"), ResolvedObj ? ResolvedObj->GetClass()->GetName() : TEXT("null"));
+					Diag->SetBoolField(TEXT("subcat_is_null"), SubCatPath.IsEmpty());
+
+					StructDiagArray.Add(MakeShared<FJsonValueObject>(Diag));
+				}
+
+				// Try multiple matching strategies for the actual fix
+				UObject* ResolvedObj = Variable.SubCategoryObject.LoadSynchronous();
+				bool bMatchesOld = (ResolvedObj == OldEnum);
+
+				// Also match by compiled property enum pointer
+				if (!bMatchesOld && !CompiledEnumPath.IsEmpty())
+				{
+					if (FProperty* Prop = UDStruct->FindPropertyByName(Variable.VarName))
+					{
+						UEnum* CompiledEnum = nullptr;
+						if (FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+							CompiledEnum = ByteProp->Enum;
+						else if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+							CompiledEnum = EnumProp->GetEnum();
+
+						if (CompiledEnum == OldEnum)
+							bMatchesOld = true;
+					}
+				}
+
+				if (bMatchesOld)
+				{
+					if (!bDryRun)
+					{
+						Variable.SubCategoryObject = TSoftObjectPtr<UObject>(NewEnum);
+
+						// Also directly update the COMPILED FByteProperty::Enum pointer
+						// This is critical because Break/Make/SetFieldsInStruct nodes derive
+						// pin types from the compiled property, not from SubCategoryObject
+						if (FProperty* Prop = UDStruct->FindPropertyByName(Variable.VarName))
+						{
+							if (FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+							{
+								ByteProp->Enum = NewEnum;
+							}
+							else if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+							{
+								// EnumProperty doesn't have a simple setter, but we can
+								// use the internal pointer if available
+							}
+						}
+
+						// Remap default value if set
+						if (!Variable.DefaultValue.IsEmpty())
+						{
+							FName OldVal = FName(*Variable.DefaultValue);
+							if (const FName* NewVal = ValueNameMap.Find(OldVal))
+							{
+								Variable.DefaultValue = NewVal->ToString();
+							}
+							else if (const FString* NewValStr = DisplayToNewValue.Find(Variable.DefaultValue))
+							{
+								Variable.DefaultValue = *NewValStr;
+							}
+						}
+					}
+
+					bStructModified = true;
+					TotalStructFieldsFixed++;
+
+					TSharedPtr<FJsonObject> FieldReport = MakeShared<FJsonObject>();
+					FieldReport->SetStringField(TEXT("struct"), UDStruct->GetName());
+					FieldReport->SetStringField(TEXT("field"), Variable.FriendlyName);
+					StructFieldReportsArray.Add(MakeShared<FJsonValueObject>(FieldReport));
+				}
+			}
+
+			if (bStructModified && !bDryRun)
+			{
+				UDStruct->MarkPackageDirty();
+			}
+		}
+	}
+
+	// Find all affected blueprints
+	TArray<FAssetData> AllBlueprintAssets;
+	AssetRegistry.GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), AllBlueprintAssets, true);
+
+	TArray<UBlueprint*> AffectedBlueprints;
+	for (const FAssetData& AssetData : AllBlueprintAssets)
+	{
+		UBlueprint* Blueprint = Cast<UBlueprint>(AssetData.GetAsset());
+		if (!Blueprint) continue;
+		if (DoesBlueprintReferenceEnum(Blueprint, OldEnum))
+		{
+			AffectedBlueprints.Add(Blueprint);
+		}
+	}
+
+	TArray<TSharedPtr<FJsonValue>> BlueprintReportsArray;
+	int32 TotalPinsMigrated = 0;
+	int32 TotalVariablesMigrated = 0;
+
+	for (UBlueprint* Blueprint : AffectedBlueprints)
+	{
+		TSharedPtr<FJsonObject> BPReport = MakeShared<FJsonObject>();
+		BPReport->SetStringField(TEXT("path"), Blueprint->GetPathName());
+		BPReport->SetStringField(TEXT("name"), Blueprint->GetName());
+
+		int32 PinCount = 0;
+		int32 VarCount = 0;
+
+		if (!bDryRun)
+		{
+			// Migrate variables
+			for (FBPVariableDescription& Var : Blueprint->NewVariables)
+			{
+				if (Var.VarType.PinSubCategoryObject.Get() == OldEnum)
+				{
+					Var.VarType.PinSubCategoryObject = NewEnum;
+					VarCount++;
+				}
+			}
+
+			// Collect all graphs (use GetAllGraphs like struct migration)
+			TArray<UEdGraph*> AllGraphs;
+			Blueprint->GetAllGraphs(AllGraphs);
+
+			// Add sub-graphs recursively (GetAllGraphs may miss node sub-graphs)
+			TArray<UEdGraph*> GraphsToProcess = AllGraphs;
+			while (GraphsToProcess.Num() > 0)
+			{
+				UEdGraph* Graph = GraphsToProcess.Pop();
+				for (UEdGraphNode* Node : Graph->Nodes)
+				{
+					for (UEdGraph* SubGraph : Node->GetSubGraphs())
+					{
+						if (SubGraph && !AllGraphs.Contains(SubGraph))
+						{
+							AllGraphs.Add(SubGraph);
+							GraphsToProcess.Add(SubGraph);
+						}
+					}
+				}
+			}
+
+			// Migrate all pins in all graphs (NO ReconstructNode — pin names don't change for enums)
+			for (UEdGraph* Graph : AllGraphs)
+			{
+				for (UEdGraphNode* Node : Graph->Nodes)
+				{
+					// Handle Switch on Enum nodes — update internal Enum reference
+					// Do NOT call SetEnum() as it rebuilds pins and breaks connections
+					if (UK2Node_SwitchEnum* SwitchNode = Cast<UK2Node_SwitchEnum>(Node))
+					{
+						if (SwitchNode->Enum == OldEnum)
+						{
+							// Build pin FName rename map: OldEnum::OldInternalName → NewEnum::NewValueName
+							// Pin FNames use qualified format "EnumName::ValueName"
+							FString OldEnumPrefix = OldEnum->GetName() + TEXT("::");
+							FString NewEnumPrefix = NewEnum->GetName() + TEXT("::");
+
+							// Remap EnumEntries from old internal names to new names
+							for (FName& Entry : SwitchNode->EnumEntries)
+							{
+								if (const FName* NewVal = ValueNameMap.Find(Entry))
+								{
+									Entry = *NewVal;
+								}
+							}
+
+							// Rename Switch node pin FNames from BP-style to C++-style
+							// so they match what the C++ enum generates on reload
+							for (UEdGraphPin* Pin : SwitchNode->Pins)
+							{
+								if (!Pin || Pin->Direction != EGPD_Output) continue;
+								FString PinNameStr = Pin->PinName.ToString();
+								// Check if pin name starts with the enum prefix (qualified name)
+								if (PinNameStr.StartsWith(OldEnumPrefix))
+								{
+									FString OldValuePart = PinNameStr.RightChop(OldEnumPrefix.Len());
+									FName OldValueFName(*OldValuePart);
+									if (const FName* NewVal = ValueNameMap.Find(OldValueFName))
+									{
+										Pin->PinName = FName(*(NewEnumPrefix + NewVal->ToString()));
+									}
+								}
+								else
+								{
+									// Try bare name (without prefix) in case pin uses display name
+									FName BareName = Pin->PinName;
+									if (const FName* NewVal = ValueNameMap.Find(BareName))
+									{
+										Pin->PinName = FName(*(NewEnumPrefix + NewVal->ToString()));
+									}
+								}
+							}
+
+							// Directly update enum pointer without reconstructing
+							SwitchNode->Enum = NewEnum;
+							PinCount++;
+							// Fall through to also update pin types below
+						}
+					}
+
+					// Handle Byte to Enum conversion nodes — update Enum field and reconstruct
+					if (UK2Node_CastByteToEnum* CastNode = Cast<UK2Node_CastByteToEnum>(Node))
+					{
+						if (CastNode->Enum == OldEnum)
+						{
+							// Save connections (simple: just byte input and enum output)
+							struct FCastPinConn { FName PinName; EEdGraphPinDirection Dir; FGuid RemoteGuid; FName RemotePin; };
+							TArray<FCastPinConn> SavedConns;
+							for (UEdGraphPin* Pin : CastNode->Pins)
+							{
+								if (!Pin) continue;
+								for (UEdGraphPin* Linked : Pin->LinkedTo)
+								{
+									if (Linked && Linked->GetOwningNode())
+										SavedConns.Add({Pin->PinName, Pin->Direction, Linked->GetOwningNode()->NodeGuid, Linked->PinName});
+								}
+								Pin->BreakAllPinLinks();
+							}
+
+							CastNode->Enum = NewEnum;
+							CastNode->ReconstructNode();
+
+							// Restore connections
+							for (const FCastPinConn& C : SavedConns)
+							{
+								UEdGraphPin* OurPin = nullptr;
+								for (UEdGraphPin* Pin : CastNode->Pins)
+								{
+									if (Pin && Pin->PinName == C.PinName && Pin->Direction == C.Dir) { OurPin = Pin; break; }
+								}
+								if (!OurPin)
+								{
+									// Try matching by direction only (pin names might change)
+									for (UEdGraphPin* Pin : CastNode->Pins)
+									{
+										if (Pin && Pin->Direction == C.Dir && Pin->LinkedTo.Num() == 0) { OurPin = Pin; break; }
+									}
+								}
+								if (OurPin)
+								{
+									for (UEdGraphNode* SN : Graph->Nodes)
+									{
+										if (SN && SN->NodeGuid == C.RemoteGuid)
+										{
+											for (UEdGraphPin* RP : SN->Pins)
+											{
+												if (RP && RP->PinName == C.RemotePin) { OurPin->MakeLinkTo(RP); break; }
+											}
+											break;
+										}
+									}
+								}
+							}
+							PinCount++;
+							continue; // Skip generic pin loop — reconstruction handled pins
+						}
+					}
+
+					// Handle Select nodes — update private fields via reflection (no SetEnum/ReconstructNode)
+					if (UK2Node_Select* SelectNode = Cast<UK2Node_Select>(Node))
+					{
+						if (SelectNode->GetEnum() == OldEnum)
+						{
+							UClass* SelectClass = SelectNode->GetClass();
+
+							// 1. Update private Enum field
+							FObjectProperty* EnumProp = CastField<FObjectProperty>(SelectClass->FindPropertyByName(TEXT("Enum")));
+							if (EnumProp)
+							{
+								void** EnumPtr = EnumProp->ContainerPtrToValuePtr<void*>(SelectNode);
+								*EnumPtr = NewEnum;
+							}
+
+							// 2. Update private IndexPinType.PinSubCategoryObject
+							FStructProperty* IndexPinTypeProp = CastField<FStructProperty>(SelectClass->FindPropertyByName(TEXT("IndexPinType")));
+							if (IndexPinTypeProp)
+							{
+								FEdGraphPinType* IndexPinTypePtr = IndexPinTypeProp->ContainerPtrToValuePtr<FEdGraphPinType>(SelectNode);
+								IndexPinTypePtr->PinSubCategoryObject = NewEnum;
+							}
+
+							// 3. Build new EnumEntries from NewEnum and update private field
+							TArray<FName> NewEnumEntries;
+							for (int32 i = 0; i < NewEnum->NumEnums() - 1; ++i)
+							{
+								bool bHidden = NewEnum->HasMetaData(TEXT("Hidden"), i) || NewEnum->HasMetaData(TEXT("Spacer"), i);
+								if (!bHidden)
+								{
+									NewEnumEntries.Add(FName(*NewEnum->GetNameStringByIndex(i)));
+								}
+							}
+
+							FArrayProperty* EnumEntriesProp = CastField<FArrayProperty>(SelectClass->FindPropertyByName(TEXT("EnumEntries")));
+							if (EnumEntriesProp)
+							{
+								TArray<FName>* EntriesPtr = EnumEntriesProp->ContainerPtrToValuePtr<TArray<FName>>(SelectNode);
+
+								// 4. Rename option pins: map old entry names to new entry names
+								// Old EnumEntries has the BP enum internal names (NewEnumerator0, etc.)
+								TArray<FName> OldEntries = *EntriesPtr;
+								for (int32 i = 0; i < OldEntries.Num() && i < NewEnumEntries.Num(); ++i)
+								{
+									FName OldPinName = OldEntries[i];
+									FName NewPinName = NewEnumEntries[i];
+									for (UEdGraphPin* Pin : SelectNode->Pins)
+									{
+										if (Pin && Pin->PinName == OldPinName)
+										{
+											Pin->PinName = NewPinName;
+											// Also update default value if it matches old enum value
+											if (!Pin->DefaultValue.IsEmpty())
+											{
+												FName OldVal = FName(*Pin->DefaultValue);
+												if (const FName* NewVal = ValueNameMap.Find(OldVal))
+												{
+													Pin->DefaultValue = NewVal->ToString();
+												}
+												else if (const FString* NewValStr = DisplayToNewValue.Find(Pin->DefaultValue))
+												{
+													Pin->DefaultValue = *NewValStr;
+												}
+											}
+											break;
+										}
+									}
+								}
+
+								// Write new EnumEntries
+								*EntriesPtr = NewEnumEntries;
+							}
+
+							// 5. Update Index pin's PinSubCategoryObject
+							for (UEdGraphPin* Pin : SelectNode->Pins)
+							{
+								if (Pin && Pin->PinName == TEXT("Index"))
+								{
+									Pin->PinType.PinSubCategoryObject = NewEnum;
+									// Remap default value
+									if (!Pin->DefaultValue.IsEmpty())
+									{
+										FName OldVal = FName(*Pin->DefaultValue);
+										if (const FName* NewVal = ValueNameMap.Find(OldVal))
+										{
+											Pin->DefaultValue = NewVal->ToString();
+										}
+										else if (const FString* NewValStr = DisplayToNewValue.Find(Pin->DefaultValue))
+										{
+											Pin->DefaultValue = *NewValStr;
+										}
+									}
+									break;
+								}
+							}
+
+							PinCount++;
+							continue; // Skip generic pin loop — Select fully handled
+						}
+					}
+
+					for (UEdGraphPin* Pin : Node->Pins)
+					{
+						if (Pin->PinType.PinSubCategoryObject.Get() == OldEnum)
+						{
+							Pin->PinType.PinSubCategoryObject = NewEnum;
+
+							// Remap default value: try internal name first, then display name
+							if (!Pin->DefaultValue.IsEmpty())
+							{
+								FName OldVal = FName(*Pin->DefaultValue);
+								if (const FName* NewVal = ValueNameMap.Find(OldVal))
+								{
+									Pin->DefaultValue = NewVal->ToString();
+								}
+								else if (const FString* NewValStr = DisplayToNewValue.Find(Pin->DefaultValue))
+								{
+									Pin->DefaultValue = *NewValStr;
+								}
+							}
+
+							PinCount++;
+						}
+						// Cleanup pass: fix pins already typed as NewEnum but with stale NewEnumerator* defaults
+						// (happens when struct reconstruction set C++ enum type but preserved old default values)
+						else if (Pin->PinType.PinSubCategoryObject.Get() == NewEnum && !Pin->DefaultValue.IsEmpty())
+						{
+							FName OldVal = FName(*Pin->DefaultValue);
+							if (const FName* NewVal = ValueNameMap.Find(OldVal))
+							{
+								Pin->DefaultValue = NewVal->ToString();
+								PinCount++;
+							}
+							else if (const FString* NewValStr = DisplayToNewValue.Find(Pin->DefaultValue))
+							{
+								Pin->DefaultValue = *NewValStr;
+								PinCount++;
+							}
+						}
+					}
+				}
+			}
+
+			// Finalize — no RefreshAllNodes to avoid breaking connections
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+		}
+		else
+		{
+			// Dry run: just count
+			for (const FBPVariableDescription& Var : Blueprint->NewVariables)
+			{
+				if (Var.VarType.PinSubCategoryObject.Get() == OldEnum)
+					VarCount++;
+			}
+			TArray<UEdGraph*> AllGraphs;
+			AllGraphs.Append(Blueprint->UbergraphPages);
+			AllGraphs.Append(Blueprint->FunctionGraphs);
+			TArray<UEdGraph*> GraphsToProcess = AllGraphs;
+			while (GraphsToProcess.Num() > 0)
+			{
+				UEdGraph* Graph = GraphsToProcess.Pop();
+				for (UEdGraphNode* Node : Graph->Nodes)
+				{
+					for (UEdGraph* SubGraph : Node->GetSubGraphs())
+					{
+						if (SubGraph && !AllGraphs.Contains(SubGraph))
+						{
+							AllGraphs.Add(SubGraph);
+							GraphsToProcess.Add(SubGraph);
+						}
+					}
+				}
+			}
+			for (UEdGraph* Graph : AllGraphs)
+			{
+				for (UEdGraphNode* Node : Graph->Nodes)
+				{
+					for (UEdGraphPin* Pin : Node->Pins)
+					{
+						if (Pin->PinType.PinSubCategoryObject.Get() == OldEnum)
+							PinCount++;
+					}
+				}
+			}
+		}
+
+		TotalPinsMigrated += PinCount;
+		TotalVariablesMigrated += VarCount;
+
+		BPReport->SetNumberField(TEXT("pins_migrated"), PinCount);
+		BPReport->SetNumberField(TEXT("variables_migrated"), VarCount);
+		BlueprintReportsArray.Add(MakeShared<FJsonValueObject>(BPReport));
+	}
+
+	// Build response
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("dry_run"), bDryRun);
+	Data->SetStringField(TEXT("source_enum"), OldEnum->GetPathName());
+	Data->SetStringField(TEXT("target_enum"), NewEnum->GetPathName());
+	Data->SetNumberField(TEXT("value_mappings_count"), ValueNameMap.Num());
+	Data->SetArrayField(TEXT("value_name_mapping"), ValueMappingsArray);
+	Data->SetNumberField(TEXT("blueprints_affected"), AffectedBlueprints.Num());
+	Data->SetArrayField(TEXT("affected_blueprints"), BlueprintReportsArray);
+	Data->SetNumberField(TEXT("total_pins_migrated"), TotalPinsMigrated);
+	Data->SetNumberField(TEXT("total_variables_migrated"), TotalVariablesMigrated);
+	Data->SetNumberField(TEXT("struct_fields_fixed"), TotalStructFieldsFixed);
+	if (StructFieldReportsArray.Num() > 0)
+	{
+		Data->SetArrayField(TEXT("struct_fields"), StructFieldReportsArray);
+	}
+	if (StructDiagArray.Num() > 0)
+	{
+		Data->SetArrayField(TEXT("struct_diagnostics"), StructDiagArray);
+	}
+	Data->SetStringField(TEXT("message"),
+		bDryRun ? TEXT("Dry run complete - no changes made") : TEXT("Enum migration complete"));
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleFixPropertyAccessPaths(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("source_struct_path")) || !Params->HasField(TEXT("target_struct_path")))
+	{
+		return MakeError(TEXT("Missing 'source_struct_path' or 'target_struct_path' parameter"));
+	}
+
+	FString SourceStructPath = Params->GetStringField(TEXT("source_struct_path"));
+	FString TargetStructPath = Params->GetStringField(TEXT("target_struct_path"));
+	bool bDryRun = Params->HasField(TEXT("dry_run")) ? Params->GetBoolField(TEXT("dry_run")) : false;
+	FString BlueprintFilter = Params->HasField(TEXT("blueprint_path")) ? Params->GetStringField(TEXT("blueprint_path")) : TEXT("");
+
+	// Load old BP struct for field name mapping
+	FString FullSourcePath = SourceStructPath;
+	if (!FullSourcePath.EndsWith(FPaths::GetCleanFilename(FullSourcePath)))
+	{
+		FullSourcePath = SourceStructPath + TEXT(".") + FPaths::GetCleanFilename(SourceStructPath);
+	}
+	UUserDefinedStruct* OldStruct = LoadObject<UUserDefinedStruct>(nullptr, *FullSourcePath);
+	if (!OldStruct)
+	{
+		OldStruct = LoadObject<UUserDefinedStruct>(nullptr, *SourceStructPath);
+	}
+	if (!OldStruct)
+	{
+		return MakeError(FString::Printf(TEXT("Source UserDefinedStruct not found at '%s'"), *SourceStructPath));
+	}
+
+	// Load new C++ struct (to verify it exists)
+	UScriptStruct* NewStruct = nullptr;
+	FString TypeNameToFind = TargetStructPath;
+	if (TargetStructPath.StartsWith(TEXT("/Script/")))
+	{
+		FString Remainder = TargetStructPath;
+		Remainder.RemoveFromStart(TEXT("/Script/"));
+		FString ModuleName;
+		Remainder.Split(TEXT("."), &ModuleName, &TypeNameToFind);
+	}
+	for (TObjectIterator<UScriptStruct> It; It; ++It)
+	{
+		if (It->GetName() == TypeNameToFind)
+		{
+			NewStruct = *It;
+			break;
+		}
+	}
+	if (!NewStruct)
+	{
+		return MakeError(FString::Printf(TEXT("Target C++ struct '%s' not found"), *TargetStructPath));
+	}
+
+	// Build GUID-suffixed → clean field name mapping
+	TMap<FString, FString> FieldNameMap; // String-based for path segment matching
+	TArray<TSharedPtr<FJsonValue>> MappingsJsonArray;
+
+	const TArray<FStructVariableDescription>& VarDescs = FStructureEditorUtils::GetVarDesc(OldStruct);
+	for (const FStructVariableDescription& Desc : VarDescs)
+	{
+		FString OldName = Desc.VarName.ToString();
+		FString CleanName = Desc.FriendlyName;
+		FieldNameMap.Add(OldName, CleanName);
+
+		TSharedPtr<FJsonObject> MapObj = MakeShared<FJsonObject>();
+		MapObj->SetStringField(TEXT("old_name"), OldName);
+		MapObj->SetStringField(TEXT("new_name"), CleanName);
+		MappingsJsonArray.Add(MakeShared<FJsonValueObject>(MapObj));
+	}
+
+	// Find the K2Node_PropertyAccess class via reflection (it's in a Private header)
+	UClass* PropertyAccessNodeClass = nullptr;
+	for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
+	{
+		if (ClassIt->GetName() == TEXT("K2Node_PropertyAccess"))
+		{
+			PropertyAccessNodeClass = *ClassIt;
+			break;
+		}
+	}
+	if (!PropertyAccessNodeClass)
+	{
+		return MakeError(TEXT("K2Node_PropertyAccess class not found - PropertyAccessNode plugin may not be loaded"));
+	}
+
+	// Find the Path property via reflection
+	FArrayProperty* PathProperty = CastField<FArrayProperty>(PropertyAccessNodeClass->FindPropertyByName(TEXT("Path")));
+	if (!PathProperty)
+	{
+		return MakeError(TEXT("Could not find 'Path' property on K2Node_PropertyAccess via reflection"));
+	}
+
+	// Find blueprints to scan
+	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+	TArray<FAssetData> AllBPAssets;
+	AssetRegistry.GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), AllBPAssets);
+	TArray<FAssetData> AnimBPAssets;
+	AssetRegistry.GetAssetsByClass(UAnimBlueprint::StaticClass()->GetClassPathName(), AnimBPAssets);
+	AllBPAssets.Append(AnimBPAssets);
+
+	TArray<TSharedPtr<FJsonValue>> BlueprintReportsArray;
+	int32 TotalNodesFixed = 0;
+	int32 TotalPathSegmentsUpdated = 0;
+
+	for (const FAssetData& Asset : AllBPAssets)
+	{
+		FString AssetPath = Asset.GetObjectPathString();
+		if (!AssetPath.StartsWith(TEXT("/Game/"))) continue;
+		if (!BlueprintFilter.IsEmpty() && !AssetPath.Contains(BlueprintFilter)) continue;
+
+		UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *AssetPath);
+		if (!Blueprint) continue;
+
+		// Collect all graphs including sub-graphs
+		TArray<UEdGraph*> AllGraphs;
+		Blueprint->GetAllGraphs(AllGraphs);
+		{
+			TArray<UEdGraph*> GraphsToProcess = AllGraphs;
+			while (GraphsToProcess.Num() > 0)
+			{
+				UEdGraph* CurrentGraph = GraphsToProcess.Pop();
+				for (UEdGraphNode* GraphNode : CurrentGraph->Nodes)
+				{
+					if (!GraphNode) continue;
+					for (UEdGraph* SubGraph : GraphNode->GetSubGraphs())
+					{
+						if (SubGraph && !AllGraphs.Contains(SubGraph))
+						{
+							AllGraphs.Add(SubGraph);
+							GraphsToProcess.Add(SubGraph);
+						}
+					}
+				}
+			}
+		}
+
+		int32 NodesFixed = 0;
+		int32 SegmentsUpdated = 0;
+		TArray<TSharedPtr<FJsonValue>> NodeDetailsArray;
+
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (!Node || !Node->IsA(PropertyAccessNodeClass)) continue;
+
+				// Read Path via reflection
+				TArray<FString>* PathPtr = PathProperty->ContainerPtrToValuePtr<TArray<FString>>(Node);
+				if (!PathPtr || PathPtr->Num() == 0) continue;
+
+				// Check if any segment needs remapping
+				bool bNeedsUpdate = false;
+				TArray<FString> NewPath = *PathPtr;
+				TSharedPtr<FJsonObject> NodeDetail = MakeShared<FJsonObject>();
+				NodeDetail->SetStringField(TEXT("node_guid"), Node->NodeGuid.ToString());
+				NodeDetail->SetStringField(TEXT("graph"), Graph->GetName());
+
+				TArray<TSharedPtr<FJsonValue>> OldPathJson;
+				for (const FString& Seg : *PathPtr)
+				{
+					OldPathJson.Add(MakeShared<FJsonValueString>(Seg));
+				}
+				NodeDetail->SetArrayField(TEXT("old_path"), OldPathJson);
+
+				for (int32 i = 0; i < NewPath.Num(); i++)
+				{
+					if (FString* CleanName = FieldNameMap.Find(NewPath[i]))
+					{
+						NewPath[i] = *CleanName;
+						bNeedsUpdate = true;
+						SegmentsUpdated++;
+					}
+				}
+
+				if (bNeedsUpdate)
+				{
+					TArray<TSharedPtr<FJsonValue>> NewPathJson;
+					for (const FString& Seg : NewPath)
+					{
+						NewPathJson.Add(MakeShared<FJsonValueString>(Seg));
+					}
+					NodeDetail->SetArrayField(TEXT("new_path"), NewPathJson);
+
+					if (!bDryRun)
+					{
+						// Save connections from the output pin
+						struct FPAConnection
+						{
+							FGuid RemoteNodeGuid;
+							FName RemotePinName;
+						};
+						TArray<FPAConnection> SavedConnections;
+
+						UEdGraphPin* OutputPin = Node->FindPin(TEXT("Value"), EGPD_Output);
+						if (OutputPin)
+						{
+							for (UEdGraphPin* Linked : OutputPin->LinkedTo)
+							{
+								if (Linked && Linked->GetOwningNode())
+								{
+									SavedConnections.Add({Linked->GetOwningNode()->NodeGuid, Linked->PinName});
+								}
+							}
+							OutputPin->BreakAllPinLinks();
+						}
+
+						// Update Path via reflection
+						*PathPtr = NewPath;
+
+						// Reconstruct node - this calls AllocatePins which resolves
+						// the property and updates TextPath + ResolvedPinType
+						Node->ReconstructNode();
+
+						// Restore connections
+						UEdGraphPin* NewOutputPin = Node->FindPin(TEXT("Value"), EGPD_Output);
+						if (NewOutputPin)
+						{
+							for (const FPAConnection& Conn : SavedConnections)
+							{
+								for (UEdGraphNode* SearchNode : Graph->Nodes)
+								{
+									if (SearchNode && SearchNode->NodeGuid == Conn.RemoteNodeGuid)
+									{
+										for (UEdGraphPin* RemotePin : SearchNode->Pins)
+										{
+											if (RemotePin && RemotePin->PinName == Conn.RemotePinName)
+											{
+												NewOutputPin->MakeLinkTo(RemotePin);
+												break;
+											}
+										}
+										break;
+									}
+								}
+							}
+						}
+
+						int32 RestoredCount = NewOutputPin ? NewOutputPin->LinkedTo.Num() : 0;
+						NodeDetail->SetNumberField(TEXT("connections_restored"), RestoredCount);
+						NodeDetail->SetNumberField(TEXT("connections_expected"), SavedConnections.Num());
+					}
+
+					NodeDetailsArray.Add(MakeShared<FJsonValueObject>(NodeDetail));
+					NodesFixed++;
+				}
+			}
+		}
+
+		if (NodesFixed > 0)
+		{
+			if (!bDryRun)
+			{
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+			}
+
+			TSharedPtr<FJsonObject> BPReport = MakeShared<FJsonObject>();
+			BPReport->SetStringField(TEXT("path"), Blueprint->GetPathName());
+			BPReport->SetStringField(TEXT("name"), Blueprint->GetName());
+			BPReport->SetNumberField(TEXT("nodes_fixed"), NodesFixed);
+			BPReport->SetNumberField(TEXT("segments_updated"), SegmentsUpdated);
+			BPReport->SetArrayField(TEXT("nodes"), NodeDetailsArray);
+			BlueprintReportsArray.Add(MakeShared<FJsonValueObject>(BPReport));
+
+			TotalNodesFixed += NodesFixed;
+			TotalPathSegmentsUpdated += SegmentsUpdated;
+		}
+	}
+
+	// Build response
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("dry_run"), bDryRun);
+	Data->SetStringField(TEXT("source_struct"), OldStruct->GetPathName());
+	Data->SetStringField(TEXT("target_struct"), NewStruct->GetPathName());
+	Data->SetNumberField(TEXT("field_mappings_count"), FieldNameMap.Num());
+	Data->SetArrayField(TEXT("field_name_mapping"), MappingsJsonArray);
+	Data->SetNumberField(TEXT("blueprints_affected"), BlueprintReportsArray.Num());
+	Data->SetArrayField(TEXT("affected_blueprints"), BlueprintReportsArray);
+	Data->SetNumberField(TEXT("total_nodes_fixed"), TotalNodesFixed);
+	Data->SetNumberField(TEXT("total_segments_updated"), TotalPathSegmentsUpdated);
+	Data->SetStringField(TEXT("message"),
+		bDryRun ? TEXT("Dry run complete - no changes made") : TEXT("PropertyAccess paths updated"));
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleFixStructSubPins(const TSharedPtr<FJsonObject>& Params)
+{
+	FString SourceStructPath = Params->GetStringField(TEXT("source_struct_path"));
+	FString TargetStructPath = Params->GetStringField(TEXT("target_struct_path"));
+	bool bDryRun = Params->HasField(TEXT("dry_run")) ? Params->GetBoolField(TEXT("dry_run")) : false;
+	FString SpecificBPPath = Params->HasField(TEXT("blueprint_path")) ? Params->GetStringField(TEXT("blueprint_path")) : TEXT("");
+	bool bReconstructEvents = Params->HasField(TEXT("reconstruct_events")) ? Params->GetBoolField(TEXT("reconstruct_events")) : false;
+
+	// Load old BP struct
+	UUserDefinedStruct* OldStruct = Cast<UUserDefinedStruct>(
+		StaticLoadObject(UScriptStruct::StaticClass(), nullptr, *SourceStructPath));
+	if (!OldStruct)
+	{
+		return MakeError(FString::Printf(TEXT("Source BP struct not found: %s"), *SourceStructPath));
+	}
+
+	// Find new C++ struct
+	FString StructNameToFind = TargetStructPath;
+	if (TargetStructPath.StartsWith(TEXT("/Script/")))
+	{
+		FString Remainder = TargetStructPath.RightChop(8);
+		FString ModuleName;
+		Remainder.Split(TEXT("."), &ModuleName, &StructNameToFind);
+	}
+	UScriptStruct* NewStruct = nullptr;
+	for (TObjectIterator<UScriptStruct> It; It; ++It)
+	{
+		if (It->GetName() == StructNameToFind) { NewStruct = *It; break; }
+	}
+	if (!NewStruct)
+	{
+		return MakeError(FString::Printf(TEXT("Target C++ struct not found: %s"), *TargetStructPath));
+	}
+
+	// Build FriendlyName → C++ property name mapping
+	TMap<FName, FName> FriendlyToPropertyMap;
+	// Build VarName (GUID-suffixed) → C++ property name mapping for sub-pin renaming
+	TMap<FString, FString> GUIDToCleanMap;
+	const TArray<FStructVariableDescription>& VarDescs = FStructureEditorUtils::GetVarDesc(OldStruct);
+	for (const FStructVariableDescription& Desc : VarDescs)
+	{
+		// Get the clean name from VarName (strip GUID suffix)
+		FString VarNameStr = Desc.VarName.ToString();
+		// Format: "FieldName_Number_GUID" — find the matching C++ property
+		for (TFieldIterator<FProperty> PropIt(NewStruct); PropIt; ++PropIt)
+		{
+			FProperty* Prop = *PropIt;
+			// Check if VarNameStr starts with the property name
+			if (VarNameStr.StartsWith(Prop->GetName()))
+			{
+				FriendlyToPropertyMap.Add(FName(*Desc.FriendlyName), FName(*Prop->GetName()));
+				GUIDToCleanMap.Add(VarNameStr, Prop->GetName());
+				break;
+			}
+		}
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetBoolField(TEXT("dry_run"), bDryRun);
+
+	// Build mappings array for report
+	TArray<TSharedPtr<FJsonValue>> MappingsArray;
+	for (const auto& Pair : FriendlyToPropertyMap)
+	{
+		TSharedPtr<FJsonObject> M = MakeShared<FJsonObject>();
+		M->SetStringField(TEXT("friendly_name"), Pair.Key.ToString());
+		M->SetStringField(TEXT("property_name"), Pair.Value.ToString());
+		MappingsArray.Add(MakeShared<FJsonValueObject>(M));
+	}
+	Data->SetArrayField(TEXT("field_mappings"), MappingsArray);
+
+	// Find affected blueprints
+	TArray<UBlueprint*> BlueprintsToProcess;
+	if (!SpecificBPPath.IsEmpty())
+	{
+		UBlueprint* BP = LoadBlueprintFromPath(SpecificBPPath);
+		if (BP) BlueprintsToProcess.Add(BP);
+	}
+	else
+	{
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> AllBPs;
+		ARM.Get().GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), AllBPs, true);
+		for (const FAssetData& AD : AllBPs)
+		{
+			UBlueprint* BP = Cast<UBlueprint>(AD.GetAsset());
+			if (BP) BlueprintsToProcess.Add(BP);
+		}
+	}
+
+	int32 TotalPinsRenamed = 0;
+	int32 TotalEventsReconstructed = 0;
+	TArray<TSharedPtr<FJsonValue>> BPReportsArray;
+
+	for (UBlueprint* Blueprint : BlueprintsToProcess)
+	{
+		int32 BPPinsRenamed = 0;
+		int32 BPEventsReconstructed = 0;
+
+		TArray<UEdGraph*> AllGraphs;
+		Blueprint->GetAllGraphs(AllGraphs);
+		// Recursively add sub-graphs
+		TArray<UEdGraph*> ToProcess = AllGraphs;
+		while (ToProcess.Num() > 0)
+		{
+			UEdGraph* G = ToProcess.Pop();
+			for (UEdGraphNode* N : G->Nodes)
+			{
+				if (!N) continue;
+				for (UEdGraph* Sub : N->GetSubGraphs())
+				{
+					if (Sub && !AllGraphs.Contains(Sub))
+					{
+						AllGraphs.Add(Sub);
+						ToProcess.Add(Sub);
+					}
+				}
+			}
+		}
+
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				if (!Node) continue;
+
+				// Rename struct sub-pins that use old friendly names or GUID-suffixed names
+				for (UEdGraphPin* Pin : Node->Pins)
+				{
+					if (!Pin) continue;
+
+					// Check if this pin is struct-typed with the new C++ struct
+					bool bIsTargetStruct = (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+						Pin->PinType.PinSubCategoryObject.Get() == NewStruct);
+					// Check if this pin is a sub-pin of a struct parent (has ParentPin with struct type)
+					bool bIsSubPinOfStruct = (Pin->ParentPin != nullptr &&
+						Pin->ParentPin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+						Pin->ParentPin->PinType.PinSubCategoryObject.Get() == NewStruct);
+
+					// If this is a sub-pin of a C++ struct parent, try GUID-suffixed rename
+					if (bIsSubPinOfStruct)
+					{
+						FString ParentPrefix = Pin->ParentPin->PinName.ToString() + TEXT("_");
+						FString PinNameStr = Pin->PinName.ToString();
+						if (PinNameStr.StartsWith(ParentPrefix))
+						{
+							FString FieldPart = PinNameStr.RightChop(ParentPrefix.Len());
+							if (FString* CleanName = GUIDToCleanMap.Find(FieldPart))
+							{
+								FString NewPinName = ParentPrefix + *CleanName;
+								if (!bDryRun)
+								{
+									Pin->PinName = FName(*NewPinName);
+								}
+								BPPinsRenamed++;
+							}
+						}
+					}
+
+					// Also check if the pin itself or its parent references the struct
+					bool bPinNameMatches = FriendlyToPropertyMap.Contains(Pin->PinName);
+
+					if (bPinNameMatches)
+					{
+						const FName* NewName = FriendlyToPropertyMap.Find(Pin->PinName);
+						if (NewName && !bDryRun)
+						{
+							Pin->PinName = *NewName;
+							BPPinsRenamed++;
+						}
+						else if (NewName)
+						{
+							BPPinsRenamed++;
+						}
+					}
+
+					// For struct-typed pins with sub-pins, rename GUID-suffixed sub-pin names
+					if (bIsTargetStruct && Pin->SubPins.Num() > 0)
+					{
+						FString ParentPrefix = Pin->PinName.ToString() + TEXT("_");
+						for (UEdGraphPin* SubPin : Pin->SubPins)
+						{
+							if (!SubPin) continue;
+							FString SubPinName = SubPin->PinName.ToString();
+							if (SubPinName.StartsWith(ParentPrefix))
+							{
+								FString FieldPart = SubPinName.RightChop(ParentPrefix.Len());
+								// Check GUID-suffixed map first
+								if (FString* CleanName = GUIDToCleanMap.Find(FieldPart))
+								{
+									FString NewPinName = ParentPrefix + *CleanName;
+									if (!bDryRun)
+									{
+										SubPin->PinName = FName(*NewPinName);
+									}
+									BPPinsRenamed++;
+								}
+								// Also check FriendlyName map (for non-GUID names)
+								else if (FriendlyToPropertyMap.Contains(FName(*FieldPart)))
+								{
+									const FName* NewName = FriendlyToPropertyMap.Find(FName(*FieldPart));
+									if (NewName)
+									{
+										FString NewPinName = ParentPrefix + NewName->ToString();
+										if (!bDryRun)
+										{
+											SubPin->PinName = FName(*NewPinName);
+										}
+										BPPinsRenamed++;
+									}
+								}
+							}
+						}
+					}
+					// Legacy: also check sub-pins by exact name match
+					else
+					{
+						for (UEdGraphPin* SubPin : Pin->SubPins)
+						{
+							if (SubPin && FriendlyToPropertyMap.Contains(SubPin->PinName))
+							{
+								const FName* NewName = FriendlyToPropertyMap.Find(SubPin->PinName);
+								if (NewName && !bDryRun)
+								{
+									SubPin->PinName = *NewName;
+									BPPinsRenamed++;
+								}
+								else if (NewName)
+								{
+									BPPinsRenamed++;
+								}
+							}
+						}
+					}
+				}
+
+				// Reconstruct event nodes that reference the struct
+				if (bReconstructEvents && !bDryRun)
+				{
+					if (Node->IsA<UK2Node_CustomEvent>() || Node->IsA<UK2Node_Event>())
+					{
+						bool bHasStructPin = false;
+						for (UEdGraphPin* Pin : Node->Pins)
+						{
+							if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
+								Pin->PinType.PinSubCategoryObject.Get() == NewStruct)
+							{
+								bHasStructPin = true;
+								break;
+							}
+						}
+						if (bHasStructPin)
+						{
+							Node->ReconstructNode();
+							BPEventsReconstructed++;
+						}
+					}
+				}
+			}
+		}
+
+		if (BPPinsRenamed > 0 || BPEventsReconstructed > 0)
+		{
+			if (!bDryRun)
+			{
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+			}
+
+			TSharedPtr<FJsonObject> BPReport = MakeShared<FJsonObject>();
+			BPReport->SetStringField(TEXT("path"), Blueprint->GetPathName());
+			BPReport->SetStringField(TEXT("name"), Blueprint->GetName());
+			BPReport->SetNumberField(TEXT("pins_renamed"), BPPinsRenamed);
+			BPReport->SetNumberField(TEXT("events_reconstructed"), BPEventsReconstructed);
+			BPReportsArray.Add(MakeShared<FJsonValueObject>(BPReport));
+
+			TotalPinsRenamed += BPPinsRenamed;
+			TotalEventsReconstructed += BPEventsReconstructed;
+		}
+	}
+
+	Data->SetNumberField(TEXT("blueprints_affected"), BPReportsArray.Num());
+	Data->SetArrayField(TEXT("affected_blueprints"), BPReportsArray);
+	Data->SetNumberField(TEXT("total_pins_renamed"), TotalPinsRenamed);
+	Data->SetNumberField(TEXT("total_events_reconstructed"), TotalEventsReconstructed);
+	Data->SetStringField(TEXT("message"), bDryRun ? TEXT("Dry run complete") : TEXT("Struct sub-pins fixed"));
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleRenameLocalVariable(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) || !Params->HasField(TEXT("function_name")) ||
+		!Params->HasField(TEXT("old_name")) || !Params->HasField(TEXT("new_name")))
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path, function_name, old_name, new_name"));
+	}
+
+	FString BPPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString FunctionName = Params->GetStringField(TEXT("function_name"));
+	FString OldName = Params->GetStringField(TEXT("old_name"));
+	FString NewName = Params->GetStringField(TEXT("new_name"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BPPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BPPath));
+	}
+
+	// Find the function graph
+	UEdGraph* FunctionGraph = nullptr;
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (Graph && Graph->GetName() == FunctionName)
+		{
+			FunctionGraph = Graph;
+			break;
+		}
+	}
+
+	if (!FunctionGraph)
+	{
+		return MakeError(FString::Printf(TEXT("Function graph '%s' not found"), *FunctionName));
+	}
+
+	// Find the FunctionEntry node
+	UK2Node_FunctionEntry* EntryNode = nullptr;
+	for (UEdGraphNode* Node : FunctionGraph->Nodes)
+	{
+		EntryNode = Cast<UK2Node_FunctionEntry>(Node);
+		if (EntryNode) break;
+	}
+
+	if (!EntryNode)
+	{
+		return MakeError(TEXT("FunctionEntry node not found in function graph"));
+	}
+
+	// Rename in LocalVariables
+	int32 VarsRenamed = 0;
+	FName OldFName(*OldName);
+	FName NewFName(*NewName);
+
+	for (FBPVariableDescription& LocalVar : EntryNode->LocalVariables)
+	{
+		if (LocalVar.VarName == OldFName)
+		{
+			LocalVar.VarName = NewFName;
+			LocalVar.FriendlyName = NewName;
+			VarsRenamed++;
+		}
+	}
+
+	// Also update any VariableGet/Set nodes that reference the old name
+	int32 NodesUpdated = 0;
+	for (UEdGraphNode* Node : FunctionGraph->Nodes)
+	{
+		if (!Node) continue;
+
+		// Check if this is a variable reference node
+		if (UK2Node_Variable* VarNode = Cast<UK2Node_Variable>(Node))
+		{
+			if (VarNode->GetVarName() == OldFName)
+			{
+				VarNode->VariableReference.SetSelfMember(NewFName);
+				NodesUpdated++;
+
+				// Also rename the pin
+				for (UEdGraphPin* Pin : VarNode->Pins)
+				{
+					if (Pin && Pin->PinName == OldFName)
+					{
+						Pin->PinName = NewFName;
+					}
+				}
+			}
+		}
+	}
+
+	if (VarsRenamed > 0 || NodesUpdated > 0)
+	{
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("blueprint"), Blueprint->GetName());
+	Data->SetStringField(TEXT("function"), FunctionName);
+	Data->SetNumberField(TEXT("variables_renamed"), VarsRenamed);
+	Data->SetNumberField(TEXT("nodes_updated"), NodesUpdated);
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Renamed '%s' to '%s'"), *OldName, *NewName));
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleFixPinEnumType(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) ||
+		!Params->HasField(TEXT("wrong_enum_path")) || !Params->HasField(TEXT("correct_enum_path")))
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path, wrong_enum_path, correct_enum_path"));
+	}
+
+	FString BPPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString WrongEnumPath = Params->GetStringField(TEXT("wrong_enum_path"));
+	FString CorrectEnumPath = Params->GetStringField(TEXT("correct_enum_path"));
+	FString TargetDefaultValue = Params->HasField(TEXT("default_value")) ? Params->GetStringField(TEXT("default_value")) : TEXT("");
+	FString TargetNodeGuid = Params->HasField(TEXT("node_guid")) ? Params->GetStringField(TEXT("node_guid")) : TEXT("");
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BPPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BPPath));
+	}
+
+	// Find both enums
+	UEnum* WrongEnum = nullptr;
+	UEnum* CorrectEnum = nullptr;
+
+	for (TObjectIterator<UEnum> It; It; ++It)
+	{
+		FString EnumPath = It->GetPathName();
+		if (EnumPath == WrongEnumPath || It->GetName() == FPaths::GetCleanFilename(WrongEnumPath))
+		{
+			WrongEnum = *It;
+		}
+		if (EnumPath == CorrectEnumPath || It->GetName() == FPaths::GetCleanFilename(CorrectEnumPath))
+		{
+			CorrectEnum = *It;
+		}
+	}
+
+	if (!WrongEnum) return MakeError(FString::Printf(TEXT("Wrong enum not found: %s"), *WrongEnumPath));
+	if (!CorrectEnum) return MakeError(FString::Printf(TEXT("Correct enum not found: %s"), *CorrectEnumPath));
+
+	// Iterate all graphs including function graphs and subgraphs
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+	{
+		TArray<UEdGraph*> GraphsToProcess = AllGraphs;
+		while (GraphsToProcess.Num() > 0)
+		{
+			UEdGraph* CurrentGraph = GraphsToProcess.Pop();
+			for (UEdGraphNode* GraphNode : CurrentGraph->Nodes)
+			{
+				if (!GraphNode) continue;
+				for (UEdGraph* SubGraph : GraphNode->GetSubGraphs())
+				{
+					if (SubGraph && !AllGraphs.Contains(SubGraph))
+					{
+						AllGraphs.Add(SubGraph);
+						GraphsToProcess.Add(SubGraph);
+					}
+				}
+			}
+		}
+	}
+
+	int32 PinsFixed = 0;
+	TArray<TSharedPtr<FJsonValue>> FixedPinsArray;
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node) continue;
+
+			// If a target node GUID is specified, only fix that node
+			if (!TargetNodeGuid.IsEmpty() && Node->NodeGuid.ToString() != TargetNodeGuid) continue;
+
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (!Pin) continue;
+				if (Pin->PinType.PinSubCategoryObject.Get() != WrongEnum) continue;
+
+				// If a target default value is specified, only fix pins with matching default
+				if (!TargetDefaultValue.IsEmpty() && Pin->DefaultValue != TargetDefaultValue) continue;
+
+				Pin->PinType.PinSubCategoryObject = CorrectEnum;
+				PinsFixed++;
+
+				TSharedPtr<FJsonObject> PinReport = MakeShared<FJsonObject>();
+				PinReport->SetStringField(TEXT("node"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+				PinReport->SetStringField(TEXT("node_guid"), Node->NodeGuid.ToString());
+				PinReport->SetStringField(TEXT("pin_name"), Pin->PinName.ToString());
+				PinReport->SetStringField(TEXT("default_value"), Pin->DefaultValue);
+				PinReport->SetStringField(TEXT("graph"), Graph->GetName());
+				FixedPinsArray.Add(MakeShared<FJsonValueObject>(PinReport));
+			}
+
+			// Also fix K2Node_CustomEvent::UserDefinedPins
+			if (UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Node))
+			{
+				for (TSharedPtr<FUserPinInfo>& PinInfo : CustomEvent->UserDefinedPins)
+				{
+					if (PinInfo.IsValid() && PinInfo->PinType.PinSubCategoryObject.Get() == WrongEnum)
+					{
+						PinInfo->PinType.PinSubCategoryObject = CorrectEnum;
+					}
+				}
+			}
+		}
+	}
+
+	if (PinsFixed > 0)
+	{
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("blueprint"), Blueprint->GetName());
+	Data->SetNumberField(TEXT("pins_fixed"), PinsFixed);
+	Data->SetArrayField(TEXT("fixed_pins"), FixedPinsArray);
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Fixed %d pins from %s to %s"), PinsFixed, *WrongEnum->GetName(), *CorrectEnum->GetName()));
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleFixEnumDefaults(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("blueprint_path")) || !Params->HasField(TEXT("enum_path")))
+	{
+		return MakeError(TEXT("Missing required parameters: blueprint_path, enum_path"));
+	}
+
+	FString BPPath = Params->GetStringField(TEXT("blueprint_path"));
+	FString EnumPath = Params->GetStringField(TEXT("enum_path"));
+	FString OldEnumPath = Params->HasField(TEXT("old_enum_path")) ? Params->GetStringField(TEXT("old_enum_path")) : TEXT("");
+	bool bDryRun = Params->HasField(TEXT("dry_run")) && Params->GetBoolField(TEXT("dry_run"));
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BPPath);
+	if (!Blueprint) return MakeError(FString::Printf(TEXT("Blueprint not found: %s"), *BPPath));
+
+	UEnum* TargetEnum = nullptr;
+	for (TObjectIterator<UEnum> It; It; ++It)
+	{
+		if (It->GetPathName() == EnumPath)
+		{
+			TargetEnum = *It;
+			break;
+		}
+	}
+	if (!TargetEnum) return MakeError(FString::Printf(TEXT("Enum not found: %s"), *EnumPath));
+
+	// Load old enum if specified (for mapping old internal names)
+	UUserDefinedEnum* OldEnum = nullptr;
+	if (!OldEnumPath.IsEmpty())
+	{
+		OldEnum = Cast<UUserDefinedEnum>(StaticLoadObject(UUserDefinedEnum::StaticClass(), nullptr, *OldEnumPath));
+	}
+
+	// Build map of short/old name -> valid default value for target enum
+	FString EnumPrefix = TargetEnum->GetName() + TEXT("::");
+	TMap<FString, FString> ValueFixMap; // Maps invalid default values to valid ones
+	for (int32 i = 0; i < TargetEnum->NumEnums() - 1; ++i)
+	{
+		FString FullName = TargetEnum->GetNameStringByIndex(i);
+		FString DisplayName = TargetEnum->GetDisplayNameTextByIndex(i).ToString();
+
+		// Determine the valid default value format
+		// Use the name form that GetIndexByNameString accepts
+		FString ValidForm = FullName;
+
+		// Check if GetNameStringByIndex returns short or qualified form
+		FString ShortName = FullName.Contains(TEXT("::")) ? FullName.RightChop(FullName.Find(TEXT("::")) + 2) : FullName;
+		FString QualifiedName = FullName.Contains(TEXT("::")) ? FullName : EnumPrefix + FullName;
+
+		// Map various possible default values to the valid form
+		if (ShortName != ValidForm) ValueFixMap.Add(ShortName, ValidForm);
+		if (QualifiedName != ValidForm) ValueFixMap.Add(QualifiedName, ValidForm);
+		if (DisplayName != ValidForm && DisplayName != ShortName) ValueFixMap.Add(DisplayName, ValidForm);
+
+		// If old enum provided, also map old internal names
+		if (OldEnum)
+		{
+			FText OldDisplayText = OldEnum->GetDisplayNameTextByIndex(i);
+			if (OldDisplayText.ToString() == DisplayName && i < OldEnum->NumEnums() - 1)
+			{
+				FString OldInternalName = OldEnum->GetNameStringByIndex(i);
+				if (OldInternalName != ValidForm)
+				{
+					ValueFixMap.Add(OldInternalName, ValidForm);
+				}
+			}
+		}
+	}
+
+	// Also build old enum internal name mapping by iterating old enum directly
+	if (OldEnum)
+	{
+		for (int32 i = 0; i < OldEnum->NumEnums() - 1; ++i)
+		{
+			FString OldInternalName = OldEnum->GetNameStringByIndex(i);
+			FString OldDisplayName = OldEnum->GetDisplayNameTextByIndex(i).ToString();
+			// Find matching new enum value by display name
+			for (int32 j = 0; j < TargetEnum->NumEnums() - 1; ++j)
+			{
+				FString NewDisplayName = TargetEnum->GetDisplayNameTextByIndex(j).ToString();
+				if (NewDisplayName == OldDisplayName)
+				{
+					FString ValidForm = TargetEnum->GetNameStringByIndex(j);
+					ValueFixMap.Add(OldInternalName, ValidForm);
+					break;
+				}
+			}
+		}
+	}
+
+	// Log the mapping for debugging
+	TArray<TSharedPtr<FJsonValue>> MappingsArray;
+	for (auto& Pair : ValueFixMap)
+	{
+		TSharedPtr<FJsonObject> M = MakeShared<FJsonObject>();
+		M->SetStringField(TEXT("from"), Pair.Key);
+		M->SetStringField(TEXT("to"), Pair.Value);
+		MappingsArray.Add(MakeShared<FJsonValueObject>(M));
+	}
+
+	// Collect all graphs
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+	{
+		TArray<UEdGraph*> GraphsToProcess = AllGraphs;
+		while (GraphsToProcess.Num() > 0)
+		{
+			UEdGraph* G = GraphsToProcess.Pop();
+			for (UEdGraphNode* N : G->Nodes)
+			{
+				if (!N) continue;
+				for (UEdGraph* Sub : N->GetSubGraphs())
+				{
+					if (Sub && !AllGraphs.Contains(Sub))
+					{
+						AllGraphs.Add(Sub);
+						GraphsToProcess.Add(Sub);
+					}
+				}
+			}
+		}
+	}
+
+	int32 PinsFixed = 0;
+	TArray<TSharedPtr<FJsonValue>> FixedPinsArray;
+	TArray<TSharedPtr<FJsonValue>> DiagnosticArray;
+
+	// Also find ALL enum objects named the same (to catch BP/C++ duplicates)
+	FString TargetEnumName = TargetEnum->GetName();
+	TArray<UEnum*> AllSameNameEnums;
+	for (TObjectIterator<UEnum> It; It; ++It)
+	{
+		if (It->GetName() == TargetEnumName)
+		{
+			AllSameNameEnums.Add(*It);
+		}
+	}
+
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node) continue;
+
+			// Fix UK2Node_CastByteToEnum node-level Enum reference
+			if (UK2Node_CastByteToEnum* CastNode = Cast<UK2Node_CastByteToEnum>(Node))
+			{
+				if (CastNode->Enum)
+				{
+					bool bOldEnum = false;
+					for (UEnum* E : AllSameNameEnums)
+					{
+						if (CastNode->Enum == E && CastNode->Enum != TargetEnum) { bOldEnum = true; break; }
+					}
+					if (bOldEnum && !bDryRun)
+					{
+						CastNode->Enum = TargetEnum;
+						PinsFixed++;
+					}
+				}
+			}
+
+			// Fix UK2Node_SwitchEnum node-level Enum reference
+			if (UK2Node_SwitchEnum* SwitchNode = Cast<UK2Node_SwitchEnum>(Node))
+			{
+				if (SwitchNode->Enum)
+				{
+					bool bOldEnum = false;
+					for (UEnum* E : AllSameNameEnums)
+					{
+						if (SwitchNode->Enum == E && SwitchNode->Enum != TargetEnum) { bOldEnum = true; break; }
+					}
+					if (bOldEnum && !bDryRun)
+					{
+						SwitchNode->Enum = TargetEnum;
+						PinsFixed++;
+					}
+				}
+			}
+
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (!Pin) continue;
+				UObject* PinEnumObj = Pin->PinType.PinSubCategoryObject.Get();
+				if (!PinEnumObj) continue;
+
+				// Check if this pin references ANY enum with the same name
+				bool bMatchesTarget = (PinEnumObj == TargetEnum);
+				bool bMatchesSameName = false;
+				for (UEnum* E : AllSameNameEnums)
+				{
+					if (PinEnumObj == E) { bMatchesSameName = true; break; }
+				}
+
+				if (!bMatchesSameName) continue;
+
+				if (!bMatchesTarget)
+				{
+					// Wrong enum object — fix PinSubCategoryObject to target
+					if (!bDryRun)
+					{
+						Pin->PinType.PinSubCategoryObject = TargetEnum;
+					}
+					PinsFixed++;
+				}
+
+				if (Pin->DefaultValue.IsEmpty()) continue;
+
+				// Report for diagnostic (only pins with non-empty defaults)
+				TSharedPtr<FJsonObject> Diag = MakeShared<FJsonObject>();
+				Diag->SetStringField(TEXT("graph"), Graph->GetName());
+				Diag->SetStringField(TEXT("node"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+				Diag->SetStringField(TEXT("node_class"), Node->GetClass()->GetName());
+				Diag->SetStringField(TEXT("node_guid"), Node->NodeGuid.ToString());
+				Diag->SetStringField(TEXT("pin_name"), Pin->PinName.ToString());
+				Diag->SetStringField(TEXT("default_value"), Pin->DefaultValue);
+				Diag->SetStringField(TEXT("enum_path"), PinEnumObj->GetPathName());
+				Diag->SetBoolField(TEXT("is_target_enum"), bMatchesTarget);
+				DiagnosticArray.Add(MakeShared<FJsonValueObject>(Diag));
+
+				// Check if default value is valid for the TARGET enum
+				int32 ValIndex = TargetEnum->GetIndexByNameString(Pin->DefaultValue);
+				if (ValIndex != INDEX_NONE) continue; // Already valid on target enum
+
+				// Try to fix: look up in ValueFixMap
+				const FString* QualifiedPtr = ValueFixMap.Find(Pin->DefaultValue);
+				if (QualifiedPtr)
+				{
+					TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
+					Report->SetStringField(TEXT("graph"), Graph->GetName());
+					Report->SetStringField(TEXT("node"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+					Report->SetStringField(TEXT("node_guid"), Node->NodeGuid.ToString());
+					Report->SetStringField(TEXT("pin_name"), Pin->PinName.ToString());
+					Report->SetStringField(TEXT("old_value"), Pin->DefaultValue);
+					Report->SetStringField(TEXT("new_value"), *QualifiedPtr);
+					FixedPinsArray.Add(MakeShared<FJsonValueObject>(Report));
+
+					if (!bDryRun)
+					{
+						Pin->DefaultValue = *QualifiedPtr;
+					}
+					PinsFixed++;
+				}
+			}
+
+			// Also fix UserDefinedPins on FunctionEntry and FunctionResult nodes
+			// These define function signatures and override pin types
+			if (UK2Node_FunctionEntry* EntryNode = Cast<UK2Node_FunctionEntry>(Node))
+			{
+				for (TSharedPtr<FUserPinInfo>& PinInfo : EntryNode->UserDefinedPins)
+				{
+					if (PinInfo.IsValid())
+					{
+						UObject* PinInfoEnum = PinInfo->PinType.PinSubCategoryObject.Get();
+						bool bInfoMatch = false;
+						for (UEnum* E : AllSameNameEnums)
+						{
+							if (PinInfoEnum == E && PinInfoEnum != TargetEnum) { bInfoMatch = true; break; }
+						}
+						if (bInfoMatch && !bDryRun)
+						{
+							PinInfo->PinType.PinSubCategoryObject = TargetEnum;
+							PinsFixed++;
+						}
+					}
+				}
+			}
+			if (UK2Node_FunctionResult* ResultNode = Cast<UK2Node_FunctionResult>(Node))
+			{
+				for (TSharedPtr<FUserPinInfo>& PinInfo : ResultNode->UserDefinedPins)
+				{
+					if (PinInfo.IsValid())
+					{
+						UObject* PinInfoEnum = PinInfo->PinType.PinSubCategoryObject.Get();
+						bool bInfoMatch = false;
+						for (UEnum* E : AllSameNameEnums)
+						{
+							if (PinInfoEnum == E && PinInfoEnum != TargetEnum) { bInfoMatch = true; break; }
+						}
+						if (bInfoMatch && !bDryRun)
+						{
+							PinInfo->PinType.PinSubCategoryObject = TargetEnum;
+							PinsFixed++;
+						}
+					}
+				}
+			}
+			// Also fix K2Node_CustomEvent UserDefinedPins
+			if (UK2Node_CustomEvent* EventNode = Cast<UK2Node_CustomEvent>(Node))
+			{
+				for (TSharedPtr<FUserPinInfo>& PinInfo : EventNode->UserDefinedPins)
+				{
+					if (PinInfo.IsValid())
+					{
+						UObject* PinInfoEnum = PinInfo->PinType.PinSubCategoryObject.Get();
+						bool bInfoMatch = false;
+						for (UEnum* E : AllSameNameEnums)
+						{
+							if (PinInfoEnum == E && PinInfoEnum != TargetEnum) { bInfoMatch = true; break; }
+						}
+						if (bInfoMatch && !bDryRun)
+						{
+							PinInfo->PinType.PinSubCategoryObject = TargetEnum;
+							PinsFixed++;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Also fix Blueprint variables
+	for (FBPVariableDescription& Var : Blueprint->NewVariables)
+	{
+		UObject* VarEnum = Var.VarType.PinSubCategoryObject.Get();
+		bool bVarMatch = false;
+		for (UEnum* E : AllSameNameEnums)
+		{
+			if (VarEnum == E && VarEnum != TargetEnum) { bVarMatch = true; break; }
+		}
+		if (bVarMatch && !bDryRun)
+		{
+			Var.VarType.PinSubCategoryObject = TargetEnum;
+			PinsFixed++;
+		}
+	}
+
+	if ((PinsFixed > 0 || DiagnosticArray.Num() > 0) && !bDryRun)
+	{
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("blueprint"), Blueprint->GetName());
+	Data->SetStringField(TEXT("enum"), TargetEnum->GetName());
+	Data->SetStringField(TEXT("enum_path"), TargetEnum->GetPathName());
+	Data->SetBoolField(TEXT("dry_run"), bDryRun);
+	Data->SetNumberField(TEXT("pins_fixed"), PinsFixed);
+	Data->SetNumberField(TEXT("same_name_enums"), AllSameNameEnums.Num());
+	Data->SetNumberField(TEXT("graphs_searched"), AllGraphs.Num());
+	Data->SetArrayField(TEXT("mappings"), MappingsArray);
+	Data->SetArrayField(TEXT("diagnostic"), DiagnosticArray);
+	Data->SetArrayField(TEXT("fixed_pins"), FixedPinsArray);
+
+	return MakeResponse(true, Data);
+}
+
+FString FMCPServer::HandleFixAssetStructReference(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid() || !Params->HasField(TEXT("asset_path")) ||
+		!Params->HasField(TEXT("old_struct_path")) || !Params->HasField(TEXT("new_struct_path")))
+	{
+		return MakeError(TEXT("Missing required parameters: asset_path, old_struct_path, new_struct_path"));
+	}
+
+	FString AssetPath = Params->GetStringField(TEXT("asset_path"));
+	FString OldStructPath = Params->GetStringField(TEXT("old_struct_path"));
+	FString NewStructPath = Params->GetStringField(TEXT("new_struct_path"));
+
+	// Load old struct
+	FString FullOldPath = OldStructPath;
+	if (!FullOldPath.Contains(TEXT(".")))
+	{
+		FullOldPath = OldStructPath + TEXT(".") + FPaths::GetCleanFilename(OldStructPath);
+	}
+	UScriptStruct* OldStruct = LoadObject<UScriptStruct>(nullptr, *FullOldPath);
+	if (!OldStruct)
+	{
+		OldStruct = LoadObject<UScriptStruct>(nullptr, *OldStructPath);
+	}
+	if (!OldStruct)
+	{
+		return MakeError(FString::Printf(TEXT("Old struct not found: %s"), *OldStructPath));
+	}
+
+	// Load new struct
+	UScriptStruct* NewStruct = nullptr;
+	FString TypeNameToFind = NewStructPath;
+	if (NewStructPath.StartsWith(TEXT("/Script/")))
+	{
+		FString Remainder = NewStructPath;
+		Remainder.RemoveFromStart(TEXT("/Script/"));
+		FString ModuleName;
+		Remainder.Split(TEXT("."), &ModuleName, &TypeNameToFind);
+	}
+	for (TObjectIterator<UScriptStruct> It; It; ++It)
+	{
+		if (It->GetName() == TypeNameToFind)
+		{
+			NewStruct = *It;
+			break;
+		}
+	}
+	if (!NewStruct)
+	{
+		return MakeError(FString::Printf(TEXT("New struct not found: %s"), *NewStructPath));
+	}
+
+	// Load the asset
+	FString FullAssetPath = AssetPath;
+	if (!FullAssetPath.Contains(TEXT(".")))
+	{
+		FullAssetPath = AssetPath + TEXT(".") + FPaths::GetCleanFilename(AssetPath);
+	}
+	UObject* Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *FullAssetPath);
+	if (!Asset)
+	{
+		Asset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
+	}
+	if (!Asset)
+	{
+		return MakeError(FString::Printf(TEXT("Asset not found: %s"), *AssetPath));
+	}
+
+	// Deep property traversal to find struct references (including inside FInstancedStruct)
+	int32 PropertiesFixed = 0;
+	TArray<TSharedPtr<FJsonValue>> FixedArray;
+
+	// Get FInstancedStruct type for special handling
+	UScriptStruct* InstancedStructType = TBaseStructure<FInstancedStruct>::Get();
+
+	// Recursive lambda to walk struct data
+	TSet<void*> VisitedPtrs;
+	TFunction<void(void*, const UStruct*, const FString&)> WalkStructData;
+	WalkStructData = [&](void* DataPtr, const UStruct* StructType, const FString& Prefix)
+	{
+		if (!DataPtr || !StructType) return;
+		if (VisitedPtrs.Contains(DataPtr)) return;
+		VisitedPtrs.Add(DataPtr);
+
+		for (TFieldIterator<FProperty> PropIt(StructType); PropIt; ++PropIt)
+		{
+			FProperty* Prop = *PropIt;
+			FString PropPath = Prefix + Prop->GetName();
+
+			// Check FObjectPropertyBase values (TObjectPtr<UScriptStruct>, etc.)
+			if (FObjectPropertyBase* ObjProp = CastField<FObjectPropertyBase>(Prop))
+			{
+				void* ValuePtr = ObjProp->ContainerPtrToValuePtr<void>(DataPtr);
+				UObject* ObjValue = ObjProp->GetObjectPropertyValue(ValuePtr);
+				if (ObjValue == OldStruct)
+				{
+					ObjProp->SetObjectPropertyValue(ValuePtr, NewStruct);
+					PropertiesFixed++;
+
+					TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
+					Report->SetStringField(TEXT("property"), PropPath);
+					Report->SetStringField(TEXT("type"), TEXT("ObjectProperty"));
+					FixedArray.Add(MakeShared<FJsonValueObject>(Report));
+				}
+			}
+
+			// Recurse into struct properties
+			if (FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+			{
+				void* StructDataPtr = StructProp->ContainerPtrToValuePtr<void>(DataPtr);
+
+				// Special handling for FInstancedStruct
+				if (StructProp->Struct == InstancedStructType)
+				{
+					FInstancedStruct* Instanced = static_cast<FInstancedStruct*>(StructDataPtr);
+					if (Instanced && Instanced->IsValid())
+					{
+						const UScriptStruct* InnerType = Instanced->GetScriptStruct();
+						if (InnerType == OldStruct)
+						{
+							// The FInstancedStruct itself holds the old struct type — reinit with new type
+							Instanced->InitializeAs(NewStruct);
+							PropertiesFixed++;
+
+							TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
+							Report->SetStringField(TEXT("property"), PropPath + TEXT(" (FInstancedStruct::ScriptStruct)"));
+							Report->SetStringField(TEXT("type"), TEXT("FInstancedStruct type"));
+							FixedArray.Add(MakeShared<FJsonValueObject>(Report));
+						}
+						else if (InnerType)
+						{
+							// Recurse into the FInstancedStruct's data to find nested references
+							void* InnerData = Instanced->GetMutableMemory();
+							if (InnerData)
+							{
+								WalkStructData(InnerData, InnerType, PropPath + TEXT("."));
+							}
+						}
+					}
+				}
+				else
+				{
+					// Regular struct — recurse
+					WalkStructData(StructDataPtr, StructProp->Struct, PropPath + TEXT("."));
+				}
+			}
+
+			// Recurse into arrays
+			if (FArrayProperty* ArrayProp = CastField<FArrayProperty>(Prop))
+			{
+				FScriptArrayHelper ArrayHelper(ArrayProp, ArrayProp->ContainerPtrToValuePtr<void>(DataPtr));
+				for (int32 i = 0; i < ArrayHelper.Num(); i++)
+				{
+					FString ElemPath = FString::Printf(TEXT("%s[%d]."), *PropPath, i);
+					void* ElemPtr = ArrayHelper.GetRawPtr(i);
+
+					if (FStructProperty* InnerStructProp = CastField<FStructProperty>(ArrayProp->Inner))
+					{
+						// Special handling for TArray<FInstancedStruct>
+						if (InnerStructProp->Struct == InstancedStructType)
+						{
+							FInstancedStruct* Instanced = static_cast<FInstancedStruct*>(ElemPtr);
+							if (Instanced && Instanced->IsValid())
+							{
+								const UScriptStruct* InnerType = Instanced->GetScriptStruct();
+								if (InnerType == OldStruct)
+								{
+									Instanced->InitializeAs(NewStruct);
+									PropertiesFixed++;
+
+									TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
+									Report->SetStringField(TEXT("property"), ElemPath + TEXT("(FInstancedStruct::ScriptStruct)"));
+									Report->SetStringField(TEXT("type"), TEXT("FInstancedStruct type in array"));
+									FixedArray.Add(MakeShared<FJsonValueObject>(Report));
+								}
+								else if (InnerType)
+								{
+									void* InnerData = Instanced->GetMutableMemory();
+									if (InnerData)
+									{
+										WalkStructData(InnerData, InnerType, ElemPath);
+									}
+								}
+							}
+						}
+						else
+						{
+							// Regular struct array element — recurse
+							WalkStructData(ElemPtr, InnerStructProp->Struct, ElemPath);
+						}
+					}
+
+					// Object array elements
+					if (FObjectPropertyBase* InnerObjProp = CastField<FObjectPropertyBase>(ArrayProp->Inner))
+					{
+						UObject* ObjValue = InnerObjProp->GetObjectPropertyValue(ElemPtr);
+						if (ObjValue == OldStruct)
+						{
+							InnerObjProp->SetObjectPropertyValue(ElemPtr, NewStruct);
+							PropertiesFixed++;
+
+							TSharedPtr<FJsonObject> Report = MakeShared<FJsonObject>();
+							Report->SetStringField(TEXT("property"), ElemPath);
+							Report->SetStringField(TEXT("type"), TEXT("ObjectProperty in array"));
+							FixedArray.Add(MakeShared<FJsonValueObject>(Report));
+						}
+					}
+				}
+			}
+		}
+	};
+
+	// Walk the main asset object and all subobjects
+	TSet<UObject*> VisitedObjs;
+	TArray<UObject*> ObjQueue;
+	ObjQueue.Add(Asset);
+	TArray<UObject*> SubObjects;
+	GetObjectsWithOuter(Asset, SubObjects, true);
+	ObjQueue.Append(SubObjects);
+
+	for (UObject* Obj : ObjQueue)
+	{
+		if (!Obj || VisitedObjs.Contains(Obj)) continue;
+		VisitedObjs.Add(Obj);
+		WalkStructData(Obj, Obj->GetClass(), Obj == Asset ? TEXT("") : Obj->GetName() + TEXT("."));
+	}
+
+	if (PropertiesFixed > 0)
+	{
+		Asset->MarkPackageDirty();
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("asset"), Asset->GetPathName());
+	Data->SetStringField(TEXT("asset_class"), Asset->GetClass()->GetName());
+	Data->SetNumberField(TEXT("properties_fixed"), PropertiesFixed);
+	Data->SetArrayField(TEXT("fixed_properties"), FixedArray);
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Fixed %d struct references in %s"), PropertiesFixed, *Asset->GetName()));
 
 	return MakeResponse(true, Data);
 }

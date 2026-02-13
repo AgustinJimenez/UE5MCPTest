@@ -98,6 +98,18 @@ private:
 	// Input system reading (Sprint 6)
 	FString HandleReadInputMappingContext(const TSharedPtr<FJsonObject>& Params);
 
+	// Struct migration (Sprint 7)
+	FString HandleMigrateStructReferences(const TSharedPtr<FJsonObject>& Params);
+	FString HandleMigrateEnumReferences(const TSharedPtr<FJsonObject>& Params);
+	FString HandleFixPropertyAccessPaths(const TSharedPtr<FJsonObject>& Params);
+	FString HandleFixStructSubPins(const TSharedPtr<FJsonObject>& Params);
+	FString HandleRenameLocalVariable(const TSharedPtr<FJsonObject>& Params);
+	FString HandleFixPinEnumType(const TSharedPtr<FJsonObject>& Params);
+	FString HandleFixEnumDefaults(const TSharedPtr<FJsonObject>& Params);
+	FString HandleFixAssetStructReference(const TSharedPtr<FJsonObject>& Params);
+	FString HandleReconstructNode(const TSharedPtr<FJsonObject>& Params);
+	FString HandleSetPinDefault(const TSharedPtr<FJsonObject>& Params);
+
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));
 	FString MakeError(const FString& Error);

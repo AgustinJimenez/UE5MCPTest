@@ -4,9 +4,29 @@ Goal: Convert Blueprints to C++ in order from easiest to hardest.
 
 ---
 
-## CURRENT STATUS (2026-02-11)
+## CURRENT STATUS (2026-02-13)
 
-**All 110 blueprints compile with 0 errors. Play in Editor functional. Sprint feature restored and working.**
+**Migration pipeline complete: 110 blueprints checked, 0 errors. Walk and sprint animations working.**
+
+### Walk/Sprint Fix (2026-02-13) — COMPLETE
+After Sprint 8 enum migration, walk and sprint animations stopped playing:
+- **Root cause (walk)**: CDO Gait and CameraStyle were `(INVALID)` — old BP enum names couldn't deserialize as C++ enum values. Fixed by setting CDO defaults via MCP (`Gait=Run`, `CameraStyle=Medium`).
+- **Root cause (sprint)**: BP event graph's "Set members in S_PlayerInputState" node lost WantsToSprint pin after struct migration, so pressing Shift never set WantsToSprint. Also, BP `SandboxCharacter_CMC` inherits from `ACharacter` (not `ASandboxCharacter_CMC` — reparenting was reverted), so C++ sprint logic never runs.
+- **Fix**: PC_Sandbox runtime fallback uses reflection to set WantsToSprint, Gait (FEnumProperty), AND MaxWalkSpeed on the CMC every tick based on `IsInputKeyDown(EKeys::LeftShift)`. Also reads SprintSpeeds/RunSpeeds via reflection for correct speed values.
+- Key insight: `Cast<ASandboxCharacter_CMC>` always fails — must use reflection for all property access from PC_Sandbox.
+
+### Struct/Enum Migration Pipeline (Sprint 8) — COMPLETE, 0 ERRORS
+Successfully migrated all 4 BP UserDefinedStructs and 7 BP UserDefinedEnums to C++ equivalents:
+- 132 struct nodes migrated across ~18 blueprints
+- 511+ enum pins migrated, 28 enum variables updated, 18 struct field enum refs fixed
+- 735+ split struct sub-pins renamed from GUID-suffixed to clean names
+- 35 PropertyAccess nodes fixed
+- Custom MCP commands built: `migrate_struct_references`, `migrate_enum_references`, `fix_property_access_paths`, `fix_struct_sub_pins`, `fix_pin_enum_type`, `rename_local_variable`, `fix_asset_struct_reference`, `fix_enum_defaults`, `set_pin_default`
+
+### All Errors Resolved
+- CameraDirector Chooser Table error: resolved by compilation after struct migration
+- Select node OrientToMovement/E_CameraMode error: fixed by `set_pin_default` (changed invalid "OrientToMovement" to "E_CameraMode::FreeCam")
+- Sprint/E_Gait reversion after restart: fixed by updating both `SubCategoryObject` AND compiled `FByteProperty::Enum` in struct field definitions, then saving structs
 
 ### MCP Server Refactored (2026-02-05)
 - Extracted tool definitions to `toolDefinitions.js` and Unreal client to `unrealClient.js`
@@ -47,18 +67,46 @@ When `SandboxCharacter_CMC` is reparented to C++:
 - Unreal treats these as **completely different types**
 - Result: "Accessed None" runtime errors
 
-### Attempted Migration (Reverted)
+### Attempted Migrations (All Reverted)
+
+**Attempt 1: Reparent + Delete Functions**
 - Deleted 9 conflicting functions from SandboxCharacter_CMC
 - Removed interface implementation from blueprint
 - Reparented blueprint to C++ class
 - **Failed**: Runtime errors in AC_TraversalLogic due to struct type mismatch
 - **Reverted**: SandboxCharacter_CMC.uasset restored from git
 
-### Proper Migration Path (Future Work)
-1. Delete blueprint structs (`S_CharacterPropertiesForAnimation`, `S_CharacterPropertiesForCamera`, `S_CharacterPropertiesForTraversal`, `S_PlayerInputState`)
-2. Delete blueprint interface (`BPI_SandboxCharacter_Pawn`)
-3. Update ALL blueprints that use these structs to use C++ structs (`FS_` prefix)
-4. Then reparent SandboxCharacter_CMC to C++ class
+**Attempt 2: Interface Type Swap via MCP (2026-02-11)**
+- Modified BP interface `BPI_SandboxCharacter_Pawn` to return C++ structs (`/Script/UETest1.*`)
+- Refreshed nodes in all affected blueprints
+- **Failed**: 26 errors across 8 blueprints — "Only exactly matching structures are considered compatible"
+- UE treats UserDefinedStruct and USTRUCT as fundamentally incompatible, even with identical fields
+- **Reverted**: All 10 affected .uasset files restored from git
+
+**Attempt 3: CoreRedirects (2026-02-11)**
+- Added `[CoreRedirects]` to DefaultEngine.ini with StructRedirects + PropertyRedirects
+- Mapped all 33 GUID-suffixed BP field names to clean C++ field names
+- Deleted the 4 BP struct .uasset files, restarted editor
+- **Failed**: 217 errors — all struct references became `<unknown struct>`
+- CoreRedirects do NOT work across UserDefinedStruct → USTRUCT boundary
+- **Reverted**: Struct files restored from git, CoreRedirects removed, full rebuild
+
+### Root Cause
+- BP UserDefinedStruct fields use GUID-suffixed names (e.g., `Mesh_15_D47797BD4F40417B966E3BB7E0AC62D3`)
+- C++ USTRUCT fields use clean FNames (e.g., `Mesh`)
+- UE's serialization, CoreRedirects, and pin matching systems cannot bridge this gap
+- Affected blueprints: SandboxCharacter_CMC, SandboxCharacter_Mover, AC_TraversalLogic, SandboxCharacter_CMC_ABP, SandboxCharacter_Mover_ABP, CameraDirector_SandboxCharacter, BP_NotifyState_MontageBlendOut, STT_SetCharacterInputState
+
+### Resolution: Custom MCP Migration Pipeline (Sprint 8)
+Built automated migration pipeline that programmatically replaces all struct/enum references:
+1. `migrate_struct_references` — updates PinSubCategoryObject, StructType, variables, local variables, UserDefinedPins
+2. `migrate_enum_references` — updates enum references on pins, variables, Switch nodes
+3. `fix_property_access_paths` — updates PropertyAccess node path segments
+4. `fix_struct_sub_pins` — renames GUID-suffixed split sub-pins (including parent-prefixed names)
+5. `fix_pin_enum_type` — targeted enum type correction with node_guid filter
+6. `break_orphaned_pins` — removes stale pins from Return Nodes
+
+Pipeline reduces errors from hundreds to 0. Key insight: struct field enum references have two layers (SubCategoryObject metadata + compiled FByteProperty::Enum) — both must be updated for persistence.
 
 ---
 
@@ -90,8 +138,11 @@ When `SandboxCharacter_CMC` is reparented to C++:
 - AC_SmartObjectAnimation (111K chars)
 - STT_PlayAnimFromBestCost (127K chars)
 
-### Blocked - Editor Module Issues (~15 blueprints)
-- All AM_* AnimModifiers (need proper editor module/plugin setup)
+### Cannot Convert - Unexported Engine Symbols (~17 blueprints)
+- All AM_* AnimModifiers — parent classes (UMotionExtractorModifier, UCopyBonesModifier,
+  UFootstepAnimEventsModifier) lack DLL export macros in AnimationModifierLibrary plugin
+- C++ subclassing causes LNK2019 unresolved externals; Blueprints work via reflection
+- These must remain as Blueprints unless Epic exports the symbols in a future UE version
 
 ### High Priority - Blocked by Type Mismatch
 - **SandboxCharacter_CMC** - Main character class

@@ -845,7 +845,15 @@ FString FMCPServer::HandleReadFunctionGraphs(const TSharedPtr<FJsonObject>& Para
 
 	TArray<TSharedPtr<FJsonValue>> GraphsArray;
 
-	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	// Collect all function graphs: regular + interface implementation graphs
+	TArray<UEdGraph*> AllFunctionGraphs;
+	AllFunctionGraphs.Append(Blueprint->FunctionGraphs);
+	for (const FBPInterfaceDescription& Interface : Blueprint->ImplementedInterfaces)
+	{
+		AllFunctionGraphs.Append(Interface.Graphs);
+	}
+
+	for (UEdGraph* Graph : AllFunctionGraphs)
 	{
 		if (!Graph) continue;
 		if (!FilterName.IsEmpty() && Graph->GetName() != FilterName) continue;
@@ -898,6 +906,41 @@ FString FMCPServer::HandleReadFunctionGraphs(const TSharedPtr<FJsonObject>& Para
 			else
 			{
 				NodeObj->SetStringField(TEXT("type"), TEXT("Other"));
+			}
+
+			// For K2Node_PropertyAccess, extract the property path via reflection
+			if (Node->GetClass()->GetName() == TEXT("K2Node_PropertyAccess"))
+			{
+				// Get TextPath (FText) via reflection - avoids needing private header include
+				FTextProperty* TextPathProp = CastField<FTextProperty>(Node->GetClass()->FindPropertyByName(TEXT("TextPath")));
+				if (TextPathProp)
+				{
+					const FText& PathText = TextPathProp->GetPropertyValue_InContainer(Node);
+					if (!PathText.IsEmpty())
+					{
+						NodeObj->SetStringField(TEXT("property_path"), PathText.ToString());
+					}
+				}
+				// Also get the Path array (TArray<FString>) for segment-level detail
+				FArrayProperty* PathArrayProp = CastField<FArrayProperty>(Node->GetClass()->FindPropertyByName(TEXT("Path")));
+				if (PathArrayProp)
+				{
+					FScriptArrayHelper ArrayHelper(PathArrayProp, PathArrayProp->ContainerPtrToValuePtr<void>(Node));
+					TArray<TSharedPtr<FJsonValue>> PathSegments;
+					FStrProperty* InnerProp = CastField<FStrProperty>(PathArrayProp->Inner);
+					if (InnerProp)
+					{
+						for (int32 i = 0; i < ArrayHelper.Num(); i++)
+						{
+							FString Segment = InnerProp->GetPropertyValue(ArrayHelper.GetRawPtr(i));
+							PathSegments.Add(MakeShared<FJsonValueString>(Segment));
+						}
+					}
+					if (PathSegments.Num() > 0)
+					{
+						NodeObj->SetArrayField(TEXT("path_segments"), PathSegments);
+					}
+				}
 			}
 
 			TArray<TSharedPtr<FJsonValue>> PinsArray;

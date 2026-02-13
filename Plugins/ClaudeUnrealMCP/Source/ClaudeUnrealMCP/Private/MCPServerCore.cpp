@@ -350,7 +350,17 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 		{TEXT("disconnect_pin"), &FMCPServer::HandleDisconnectPin},
 		{TEXT("add_set_struct_node"), &FMCPServer::HandleAddSetStructNode},
 		{TEXT("delete_node"), &FMCPServer::HandleDeleteNode},
-		{TEXT("read_input_mapping_context"), &FMCPServer::HandleReadInputMappingContext}
+		{TEXT("read_input_mapping_context"), &FMCPServer::HandleReadInputMappingContext},
+		{TEXT("migrate_struct_references"), &FMCPServer::HandleMigrateStructReferences},
+		{TEXT("migrate_enum_references"), &FMCPServer::HandleMigrateEnumReferences},
+		{TEXT("fix_property_access_paths"), &FMCPServer::HandleFixPropertyAccessPaths},
+		{TEXT("fix_struct_sub_pins"), &FMCPServer::HandleFixStructSubPins},
+		{TEXT("rename_local_variable"), &FMCPServer::HandleRenameLocalVariable},
+		{TEXT("fix_pin_enum_type"), &FMCPServer::HandleFixPinEnumType},
+		{TEXT("fix_enum_defaults"), &FMCPServer::HandleFixEnumDefaults},
+		{TEXT("fix_asset_struct_reference"), &FMCPServer::HandleFixAssetStructReference},
+		{TEXT("reconstruct_node"), &FMCPServer::HandleReconstructNode},
+		{TEXT("set_pin_default"), &FMCPServer::HandleSetPinDefault}
 	};
 
 	if (const FCommandHandler* Handler = CommandHandlers.Find(Command))

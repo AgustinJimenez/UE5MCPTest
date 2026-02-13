@@ -1183,6 +1183,52 @@ export const MCP_TOOL_DEFINITIONS = [
           required: ["blueprint_path", "struct_type"],
         },
       },
+      // Sprint 7: Struct Migration
+      {
+        name: "migrate_struct_references",
+        description: "Migrate all blueprint references from a UserDefinedStruct (BP struct) to a C++ USTRUCT across all blueprints. Handles variable types, graph node pins (Break/Make/Set struct nodes), and GUID-to-clean field name remapping. Preserves pin connections by saving and rewiring after node reconstruction. Use dry_run=true to preview changes without modifying anything.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source_struct_path: {
+              type: "string",
+              description: "Full asset path to the BP UserDefinedStruct to migrate FROM (e.g., '/Game/Blueprints/Data/S_PlayerInputState')",
+            },
+            target_struct_path: {
+              type: "string",
+              description: "Path to the C++ UScriptStruct to migrate TO (e.g., '/Script/UETest1.S_PlayerInputState'). UE5 strips the F prefix from C++ struct names.",
+            },
+            dry_run: {
+              type: "boolean",
+              description: "If true, report what would change without modifying anything. Default: false",
+            },
+          },
+          required: ["source_struct_path", "target_struct_path"],
+        },
+      },
+      // Sprint 7b: Enum Migration
+      {
+        name: "migrate_enum_references",
+        description: "Migrate all blueprint references from a UserDefinedEnum (BP enum) to a C++ UENUM across all blueprints. Handles variable types, function parameters, graph node pins, and enum literal nodes. Use dry_run=true to preview changes.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source_enum_path: {
+              type: "string",
+              description: "Full asset path to the BP UserDefinedEnum to migrate FROM (e.g., '/Game/Blueprints/Data/E_Gait')",
+            },
+            target_enum_path: {
+              type: "string",
+              description: "Path to the C++ UEnum to migrate TO (e.g., '/Script/UETest1.E_Gait')",
+            },
+            dry_run: {
+              type: "boolean",
+              description: "If true, report what would change without modifying anything. Default: false",
+            },
+          },
+          required: ["source_enum_path", "target_enum_path"],
+        },
+      },
       // Sprint 6: Input System Reading
       {
         name: "read_input_mapping_context",

@@ -10,76 +10,11 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetStringLibrary.h"
 #include "GameFramework/GameModeBase.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerInput.h"
 #include "InputCoreTypes.h"
-#include "SandboxCharacter_CMC.h"
-#include "UObject/Field.h"
 #include "UObject/UnrealType.h"
-
-namespace
-{
-	bool TryReadBPInputState(UObject* Object, bool& bOutWantsSprint, bool& bOutWantsWalk, FString& OutGaitName)
-	{
-		if (!Object)
-		{
-			return false;
-		}
-
-		UClass* Class = Object->GetClass();
-		if (!Class)
-		{
-			return false;
-		}
-
-		bool bAnyRead = false;
-		bOutWantsSprint = false;
-		bOutWantsWalk = false;
-		OutGaitName = TEXT("Unknown");
-
-		if (const FStructProperty* InputStateProp = FindFProperty<FStructProperty>(Class, TEXT("CharacterInputState")))
-		{
-			void* InputStatePtr = InputStateProp->ContainerPtrToValuePtr<void>(Object);
-			if (InputStatePtr && InputStateProp->Struct)
-			{
-				for (TFieldIterator<FProperty> It(InputStateProp->Struct); It; ++It)
-				{
-					const FProperty* MemberProp = *It;
-					if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(MemberProp))
-					{
-						const FString MemberName = MemberProp->GetName();
-						if (MemberName.Contains(TEXT("WantsToSprint")))
-						{
-							bOutWantsSprint = BoolProp->GetPropertyValue_InContainer(InputStatePtr);
-							bAnyRead = true;
-						}
-						else if (MemberName.Contains(TEXT("WantsToWalk")))
-						{
-							bOutWantsWalk = BoolProp->GetPropertyValue_InContainer(InputStatePtr);
-							bAnyRead = true;
-						}
-					}
-				}
-			}
-		}
-
-		if (const FByteProperty* GaitProp = FindFProperty<FByteProperty>(Class, TEXT("Gait")))
-		{
-			const uint8 GaitValue = GaitProp->GetPropertyValue_InContainer(Object);
-			if (GaitProp->Enum)
-			{
-				OutGaitName = GaitProp->Enum->GetNameStringByValue(GaitValue);
-			}
-			else
-			{
-				OutGaitName = FString::FromInt(static_cast<int32>(GaitValue));
-			}
-			bAnyRead = true;
-		}
-
-		return bAnyRead;
-	}
-}
 
 APC_Sandbox::APC_Sandbox()
 {
@@ -175,33 +110,66 @@ void APC_Sandbox::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// Temporary runtime fallback: enforce sprint speed/gait for SandboxCharacter_CMC blueprint instances.
+	// Sprint/gait: directly check LeftShift and set WantsToSprint + Gait + MaxWalkSpeed via reflection.
+	// NOTE: BP SandboxCharacter_CMC inherits from ACharacter (not ASandboxCharacter_CMC), so we use reflection.
 	if (APawn* ControlledPawn = GetPawn())
 	{
 		if (ACharacter* CharacterPawn = Cast<ACharacter>(ControlledPawn))
 		{
-			bool bWantsSprint = false;
-			bool bWantsWalk = false;
-			FString GaitName;
-			if (TryReadBPInputState(ControlledPawn, bWantsSprint, bWantsWalk, GaitName))
-			{
-				if (UCharacterMovementComponent* CMC = CharacterPawn->GetCharacterMovement())
-				{
-					const bool bHasMoveInput = ControlledPawn->GetPendingMovementInputVector().Size2D() > 0.1f || CMC->GetCurrentAcceleration().Size2D() > 0.1f;
-					const bool bShouldSprint = bWantsSprint && bHasMoveInput;
-					const float TargetMaxWalkSpeed = bShouldSprint ? 700.0f : 500.0f;
-					if (!FMath::IsNearlyEqual(CMC->MaxWalkSpeed, TargetMaxWalkSpeed, 1.0f))
-					{
-						CMC->MaxWalkSpeed = TargetMaxWalkSpeed;
-					}
+			const bool bShiftHeld = IsInputKeyDown(EKeys::LeftShift);
+			UClass* PawnClass = ControlledPawn->GetClass();
 
-					// Keep animation state aligned with speed override for the BP enum.
-					if (FByteProperty* GaitProp = FindFProperty<FByteProperty>(ControlledPawn->GetClass(), TEXT("Gait")))
+			// Set WantsToSprint on CharacterInputState struct
+			if (FStructProperty* InputStateProp = FindFProperty<FStructProperty>(PawnClass, TEXT("CharacterInputState")))
+			{
+				void* StructPtr = InputStateProp->ContainerPtrToValuePtr<void>(ControlledPawn);
+				for (TFieldIterator<FProperty> It(InputStateProp->Struct); It; ++It)
+				{
+					if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(*It))
 					{
-						const uint8 TargetGait = bShouldSprint ? 2 : 1; // E_Gait: Walk=0, Run=1, Sprint=2
-						GaitProp->SetPropertyValue_InContainer(ControlledPawn, TargetGait);
+						if (It->GetName().Contains(TEXT("WantsToSprint")))
+						{
+							BoolProp->SetPropertyValue_InContainer(StructPtr, bShiftHeld);
+						}
 					}
 				}
+			}
+
+			if (UCharacterMovementComponent* CMC = CharacterPawn->GetCharacterMovement())
+			{
+				const bool bHasMoveInput = ControlledPawn->GetPendingMovementInputVector().Size2D() > 0.1f || CMC->GetCurrentAcceleration().Size2D() > 0.1f;
+				const bool bShouldSprint = bShiftHeld && bHasMoveInput;
+
+				// Set Gait (FEnumProperty or FByteProperty)
+				const uint8 TargetGait = bShouldSprint ? 2 : 1; // Walk=0, Run=1, Sprint=2
+				if (FByteProperty* GaitProp = FindFProperty<FByteProperty>(PawnClass, TEXT("Gait")))
+				{
+					GaitProp->SetPropertyValue_InContainer(ControlledPawn, TargetGait);
+				}
+				else if (FEnumProperty* GaitEnumProp = FindFProperty<FEnumProperty>(PawnClass, TEXT("Gait")))
+				{
+					FNumericProperty* UnderlyingProp = GaitEnumProp->GetUnderlyingProperty();
+					if (UnderlyingProp)
+					{
+						UnderlyingProp->SetIntPropertyValue(GaitEnumProp->ContainerPtrToValuePtr<void>(ControlledPawn), (int64)TargetGait);
+					}
+				}
+
+				// Read SprintSpeeds.X and RunSpeeds.X to set MaxWalkSpeed directly
+				double SprintSpeedX = 700.0;
+				double RunSpeedX = 500.0;
+				if (FProperty* SprintProp = FindFProperty<FProperty>(PawnClass, TEXT("SprintSpeeds")))
+				{
+					const FVector* SprintVec = SprintProp->ContainerPtrToValuePtr<FVector>(ControlledPawn);
+					if (SprintVec) SprintSpeedX = SprintVec->X;
+				}
+				if (FProperty* RunProp = FindFProperty<FProperty>(PawnClass, TEXT("RunSpeeds")))
+				{
+					const FVector* RunVec = RunProp->ContainerPtrToValuePtr<FVector>(ControlledPawn);
+					if (RunVec) RunSpeedX = RunVec->X;
+				}
+
+				CMC->MaxWalkSpeed = bShouldSprint ? SprintSpeedX : RunSpeedX;
 			}
 		}
 	}
