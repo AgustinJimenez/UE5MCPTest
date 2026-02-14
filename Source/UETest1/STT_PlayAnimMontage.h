@@ -6,7 +6,7 @@
 #include "STT_PlayAnimMontage.generated.h"
 
 class AActor;
-class UActorComponent;
+class UAC_SmartObjectAnimation;
 class UAnimMontage;
 class UCharacterMoverComponent;
 
@@ -56,10 +56,7 @@ protected:
 
 private:
 	UPROPERTY()
-	TSubclassOf<UActorComponent> SmartObjectAnimationClass;
-
-	UPROPERTY()
-	TObjectPtr<UActorComponent> SmartObjectAnimComponent;
+	TObjectPtr<UAC_SmartObjectAnimation> SmartObjectAnimComponent;
 
 	UFUNCTION()
 	void OnAnimationFinished();
