@@ -88,6 +88,8 @@ private:
 	// Blueprint CDO property manipulation (Sprint 4)
 	FString HandleSetBlueprintCDOProperty(const TSharedPtr<FJsonObject>& Params);
 	FString HandleRemoveImplementedInterface(const TSharedPtr<FJsonObject>& Params);
+	FString HandleAddImplementedInterface(const TSharedPtr<FJsonObject>& Params);
+	FString HandleMigrateInterfaceReferences(const TSharedPtr<FJsonObject>& Params);
 
 	// Blueprint node manipulation (Sprint 5)
 	FString HandleConnectNodes(const TSharedPtr<FJsonObject>& Params);

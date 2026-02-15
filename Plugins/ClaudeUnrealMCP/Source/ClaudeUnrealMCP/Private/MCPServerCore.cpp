@@ -346,6 +346,8 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 		{TEXT("replace_component_class"), &FMCPServer::HandleReplaceComponentClass},
 		{TEXT("set_blueprint_cdo_property"), &FMCPServer::HandleSetBlueprintCDOProperty},
 		{TEXT("remove_implemented_interface"), &FMCPServer::HandleRemoveImplementedInterface},
+		{TEXT("add_implemented_interface"), &FMCPServer::HandleAddImplementedInterface},
+		{TEXT("migrate_interface_references"), &FMCPServer::HandleMigrateInterfaceReferences},
 		{TEXT("connect_nodes"), &FMCPServer::HandleConnectNodes},
 		{TEXT("disconnect_pin"), &FMCPServer::HandleDisconnectPin},
 		{TEXT("add_set_struct_node"), &FMCPServer::HandleAddSetStructNode},

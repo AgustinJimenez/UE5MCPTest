@@ -7,6 +7,7 @@
 #include "LocomotionEnums.h"
 #include "SandboxCharacter_CMC.generated.h"
 
+class APlayerController;
 class UMotionWarpingComponent;
 class UAC_PreCMCTick;
 class UCameraComponent;
@@ -171,11 +172,60 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Movement|State")
 	float StrafeSpeedMap;
 
+	UPROPERTY(BlueprintReadWrite, Category = "Movement|State")
+	bool IsMovingOnGround;
+
+	// ===== CAMERA & ROTATION =====
+
+	UFUNCTION(BlueprintCallable, Category = "Camera")
+	void SetupCamera();
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Rotation")
+	void UpdateRotation_PreCMC();
+
+	// ===== TRAVERSAL =====
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Traversal")
+	FS_TraversalCheckInputs GetTraversalCheckInputs();
+
+	// ===== SIMULATED PROXY =====
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Simulated")
+	void UpdatedMovementSimulated(FVector OldVelocity);
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Events")
+	void CustomOnLandedEvent(FVector InLandVelocity);
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Events")
+	void CustomOnJumpedEvent(double GroundSpeedBeforeJump);
+
+	// ===== RAGDOLL =====
+
+	UFUNCTION(BlueprintCallable, Category = "Ragdoll")
+	void Ragdoll_Start();
+
+	UFUNCTION(BlueprintCallable, Category = "Ragdoll")
+	void Ragdoll_End();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void Landed(const FHitResult& Hit) override;
+	virtual void PossessedBy(AController* NewController) override;
+	virtual void OnWalkingOffLedge_Implementation(const FVector& PreviousFloorImpactNormal, const FVector& PreviousFloorContactNormal, const FVector& PreviousLocation, float TimeDelta) override;
+
+	// PreCMCTick delegate handler - runs before CharacterMovementComponent ticks
+	UFUNCTION()
+	void OnPreCMCTick();
+
+	// Simulated proxy: called when CharacterMovementComponent updates
+	UFUNCTION()
+	void OnMovementUpdatedSimulated(float DeltaSeconds, FVector OldLocation, FVector OldVelocity);
+
+	// Replicated input state for multiplayer
+	UFUNCTION(Server, Reliable)
+	void UpdateInputState_Server(FS_PlayerInputState NewInputState);
 
 	// ===== INPUT HANDLERS =====
 
@@ -198,6 +248,9 @@ protected:
 	void ResetJustLanded();
 
 	// ===== CACHED COMPONENTS =====
+
+	UPROPERTY(Transient)
+	TObjectPtr<APlayerController> CachedPlayerController;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMotionWarpingComponent> CachedMotionWarping;
@@ -233,4 +286,7 @@ protected:
 private:
 	// Timer handle for JustLanded flag reset
 	FTimerHandle JustLandedTimerHandle;
+
+	// Whether OnPreCMCTick delegate was successfully bound
+	bool bPreCMCTickBound = false;
 };

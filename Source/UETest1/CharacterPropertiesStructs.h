@@ -108,6 +108,30 @@ struct FS_CharacterPropertiesForCamera
 };
 
 USTRUCT(BlueprintType)
+struct FS_TraversalCheckInputs
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traversal")
+	FVector TraceForwardDirection = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traversal")
+	double TraceForwardDistance = 75.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traversal")
+	FVector TraceOriginOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traversal")
+	FVector TraceEndOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traversal")
+	double TraceRadius = 30.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traversal")
+	double TraceHalfHeight = 60.0;
+};
+
+USTRUCT(BlueprintType)
 struct FS_CharacterPropertiesForTraversal
 {
 	GENERATED_BODY()

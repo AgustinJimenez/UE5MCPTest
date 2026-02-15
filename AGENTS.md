@@ -100,7 +100,7 @@ The MCP server:
 - Must be configured in `~/.claude.json` (see CLAUDE.md)
 
 **Restarting Unreal Engine after MCP updates:**
-- **IMPORTANT**: Always run `save_all` MCP command BEFORE restarting to save blueprint changes
+- **IMPORTANT**: Save modified assets individually with `save_asset` BEFORE restarting. **Do NOT use `save_all`** — it corrupts UserDefinedEnum assets.
 - After modifying C++ code in the MCP plugin and recompiling, Unreal Engine must be restarted to load the new DLL
 - macOS: `npm run restart:ue` (from project root)
 - Windows: `npm run restart:ue:win` (from project root)
@@ -238,7 +238,7 @@ This project includes ClaudeUnrealMCP, a custom MCP plugin for AI assistant inte
 - `reparent_blueprint` - Change blueprint parent class
 - `compile_blueprint` - Compile a blueprint and return detailed errors/warnings
 - `save_asset` - Save a specific asset to disk
-- `save_all` - Save all modified assets in the project
+- `save_all` - **⚠️ AVOID** - Corrupts UserDefinedEnum assets (CppForm assertion crash). Use `save_asset` individually instead.
 - `delete_interface_function` - Delete a function from a Blueprint Interface
 - `delete_function_graph` - Delete a function graph from a Blueprint or Blueprint Function Library
 - `refresh_nodes` - Refresh/reconstruct all nodes in a blueprint to fix stale pin errors
@@ -318,6 +318,20 @@ This distinction should be highlighted in:
 **Interface Function Parameter Modification (2026-02-01):**
 - `list_structs` - Debug command: List all registered UScriptStruct objects matching a pattern. Useful for discovering struct names available via reflection. Note: UE strips the 'F' prefix from C++ struct names (e.g., `FS_PlayerInputState` becomes `S_PlayerInputState` in reflection).
 - `modify_interface_function_parameter` - Modify a parameter type in a Blueprint Interface function. Can change struct types between Blueprint and C++ versions. **Warning:** Changing between Blueprint structs (at `/Game/...`) and C++ structs (at `/Script/...`) will cause "Only exactly matching structures are considered compatible" errors in all blueprints using that interface until they are also updated.
+
+**Interface & Struct Migration Commands (Sprint 7+8 — 2026-02-08):**
+- `migrate_struct_references` - Migrate all blueprint struct references (pins, variables, nodes) from BP UserDefinedStruct to C++ USTRUCT across all blueprints
+- `migrate_enum_references` - Migrate all blueprint enum references (pins, variables, switch nodes, cast nodes, struct fields) from BP UserDefinedEnum to C++ UENUM
+- `migrate_interface_references` - **CRITICAL** - Migrate K2Node_Message nodes from BP interface to C++ UINTERFACE. Fixes silent dispatch failures after reparenting BP to C++ parent. Params: `old_interface_path` (BP), `new_interface_path` (C++), optional `blueprint_paths` array
+- `add_implemented_interface` - Add a BP or C++ interface to a blueprint. Supports `skip_graphs: true` to add interface reference without creating override function graphs (needed when C++ parent already provides implementations)
+- `remove_implemented_interface` - Remove an interface from a blueprint
+- `modify_interface_function_parameter` - Modify parameter type in BP interface function. Now supports `new_name` to rename parameters.
+- `fix_enum_defaults` - Fix stale enum default values on pins after enum migration
+- `fix_property_access_paths` - Fix PropertyAccess paths after struct migration
+- `fix_struct_sub_pins` - Fix struct sub-pin references after struct migration
+- `fix_asset_struct_reference` - Fix struct references in non-blueprint assets (Chooser Tables, etc.)
+- `reconstruct_node` - Reconstruct a specific node by ID to refresh pins
+- `set_pin_default` - Set a pin's default value by node ID and pin name
 
 **IMPORTANT:** After compiling C++ changes to the MCP plugin, you must restart Unreal Editor to load the updated plugin DLL:
 ```bash
@@ -435,10 +449,8 @@ await clear_component_map_value_array({
   - `error_count` / `warning_count`: Counts for quick overview
 
 **Save Functionality (New)**
-- `save_all` command saves all modified assets in the project
-- Returns counts of saved/failed packages
-- Lists any packages that failed to save
-- Eliminates need to manually click Save in the editor
+- `save_asset` command saves a specific asset to disk — **preferred method**
+- `save_all` — **⚠️ AVOID**: corrupts UserDefinedEnum assets (CppForm assertion crash). Use `save_asset` individually instead.
 
 **Advanced Error Fixing (New - 2026-01-29)**
 - `delete_function_graph` - Removes function graphs from Blueprint Function Libraries that conflict with C++ implementations
@@ -618,85 +630,41 @@ if (CachedStaticMesh && !DynamicMaterial)
 
 ## TODO
 
-- [ ] Test Sprint 1 blueprint function creation commands
-- [ ] Implement Sprint 2: Node manipulation
-- [ ] Implement Sprint 3: Graph analysis
-- [ ] Convert blueprints to C++ using incremental approach (data types first, then logic)
-- [ ] Consider converting enums (E_MovementMode, E_Gait, E_Stance, etc.) to C++ as foundation for further conversion
-- [ ] **CRITICAL**: Resolve Blueprint vs C++ struct/interface type mismatch before any character class migration
+- [x] ~~Resolve Blueprint vs C++ struct/interface type mismatch~~ — DONE (migrate_struct_references + migrate_enum_references + migrate_interface_references)
+- [x] ~~Convert enums to C++~~ — DONE (7 enums migrated)
+- [x] ~~Reparent SandboxCharacter_CMC to C++~~ — DONE (traversal, animations, camera all working)
+- [ ] Port remaining ABP functions to C++ (Update_Trajectory, BlendStackInputs, Update_States)
+- [ ] Continue converting other blueprints to C++
 
 ---
 
-## Known Issue: Blueprint vs C++ Interface/Struct Type Mismatch
+## RESOLVED: Blueprint vs C++ Interface/Struct Type Mismatch (2026-02-15)
 
-### Problem Summary
-The project has **duplicate interface and struct definitions** - one set in Blueprints and one in C++:
+### Problem (now solved)
+The project had duplicate interface and struct definitions — BP `S_` structs + BP interface vs C++ `FS_` structs + C++ UINTERFACE. After reparenting SandboxCharacter_CMC to C++, K2Node_Message dispatch failed silently because BP interface and C++ UINTERFACE are separate UClass objects.
 
-| Blueprint Asset (S_ prefix) | C++ Definition (FS_ prefix) |
-|----------------------------|----------------------------|
-| `S_PlayerInputState` | `FS_PlayerInputState` |
-| `S_CharacterPropertiesForAnimation` | `FS_CharacterPropertiesForAnimation` |
-| `S_CharacterPropertiesForCamera` | `FS_CharacterPropertiesForCamera` |
-| `S_CharacterPropertiesForTraversal` | `FS_CharacterPropertiesForTraversal` |
-| `BPI_SandboxCharacter_Pawn` (BP asset) | `IBPI_SandboxCharacter_Pawn` (C++ class) |
+### Solution: 3-Phase Migration Pipeline
+The migration was completed using custom MCP tools built specifically for this:
 
-### Why This Causes Problems
-When `SandboxCharacter_CMC` blueprint is reparented to C++ class `ASandboxCharacter_CMC`:
-1. The C++ class implements `IBPI_SandboxCharacter_Pawn` returning `FS_` structs
-2. But blueprints like `AC_TraversalLogic` call the BP interface expecting `S_` structs
-3. Unreal treats these as **completely different types** even if fields are identical
-4. Result: "Accessed None" runtime errors and "Only exactly matching structures are considered compatible" compile errors
+**Phase 1 — Struct & Enum Migration:**
+1. `modify_interface_function_parameter` — Update BP interface function signatures to use C++ struct types
+2. `migrate_struct_references` — Migrate all BP struct refs (pins, variables, nodes) to C++ USTRUCT
+3. `migrate_enum_references` — Migrate all BP enum refs (pins, variables, switch/cast nodes, struct fields) to C++ UENUM
+4. Save structs individually, `fix_enum_defaults`, `fix_property_access_paths`, `fix_struct_sub_pins`
 
-### Error Messages Seen
-```
-Blueprint Runtime Error: "Accessed None trying to read (real) property Capsule_21_D1F3797D47A5FB49C3DFAE8FAB15AFCC in not an UClass"
-Can't connect pins: Only exactly matching structures are considered compatible
-```
+**Phase 2 — Interface Migration (the critical fix):**
+5. `migrate_interface_references` — Change K2Node_Message `FunctionReference.MemberParent` from BP interface class (`BPI_Foo_C`) to C++ interface class (`BPI_Foo`). This is the key insight: **migrate the callers, don't try to add the BP interface back to the character**.
 
-### Files Involved
-- **Blueprint Structs**: `Content/Blueprints/Data/S_*.uasset`
-- **Blueprint Interface**: `Content/Blueprints/BPI_SandboxCharacter_Pawn.uasset`
-- **C++ Structs**: `Source/UETest1/CharacterPropertiesStructs.h`
-- **C++ Interface**: `Source/UETest1/BPI_SandboxCharacter_Pawn.h`
-- **Affected Blueprints**: AC_TraversalLogic, SandboxCharacter_CMC, SandboxCharacter_Mover, and any BP using these interfaces
+**Phase 3 — Reparent & Clean Up:**
+6. Reparent SandboxCharacter_CMC BP to C++ `ASandboxCharacter_CMC`
+7. C++ class implements `IBPI_SandboxCharacter_Pawn` with `_Implementation` functions
+8. Clear BP event graph (C++ Tick handles traversal via ProcessEvent)
+9. ABP: C++ `NativeUpdateAnimation` calls `Execute_Get_PropertiesForAnimation` directly
 
-### Research Links
-- [Epic Forums: "Only exactly matching structures are considered compatible"](https://forums.unrealengine.com/t/only-exactly-matching-structures-are-considered-compatible-error/144342)
-- [Epic Docs: Interfaces in Unreal Engine](https://dev.epicgames.com/documentation/en-us/unreal-engine/interfaces-in-unreal-engine)
-- [Epic Docs: Blueprint vs C++](https://dev.epicgames.com/documentation/en-us/unreal-engine/coding-in-unreal-engine-blueprint-vs-cplusplus)
-- [Epic Forums: C++ Interface implemented in BP is null](https://forums.unrealengine.com/t/c-interface-implemented-in-bp-is-null/491758)
-
-### Key Insights from Research
-1. **Blueprint interfaces ≠ C++ interfaces**: They are separate systems. `Cast<>` returns null for BP-implemented interfaces
-2. **Use `TScriptInterface<>`**: For C++ code that needs to work with BP interfaces
-3. **Use `Implements<UInterface>()`**: Instead of `Cast<IInterface>()` when checking BP implementations
-4. **Struct compatibility is strict**: Even identical fields won't match if defined separately
-
-### Migration Options (in order of preference)
-
-**Option 1: Delete Blueprint Definitions, Use C++ Only**
-1. Delete all `S_` blueprint structs from `Content/Blueprints/Data/`
-2. Delete blueprint interface `BPI_SandboxCharacter_Pawn.uasset`
-3. Update ALL blueprints to use C++ structs (`FS_` prefix) and C++ interface
-4. Use Core Redirects if needed for asset references
-5. Then reparent character blueprints to C++ classes
-
-**Option 2: Keep Blueprint System, Manual Input Config**
-1. Don't reparent SandboxCharacter_CMC to C++
-2. Add input properties (IMC_Sandbox, IA_Sprint, etc.) directly to blueprint
-3. Configure input handling in blueprint Event Graph
-4. Keep existing blueprint interface system
-
-**Option 3: Bridge Both Systems (Complex)**
-1. Have C++ class implement BOTH interfaces
-2. Create adapter functions that convert between struct types
-3. High maintenance burden, not recommended
-
-### Attempted Migration (2026-02-03, Reverted)
-- Deleted 9 conflicting functions from SandboxCharacter_CMC
-- Removed interface implementation from blueprint
-- Reparented blueprint to C++ class
-- Set input properties via new MCP tool
-- Fixed C++ interface implementations
-- **Failed**: Runtime errors in AC_TraversalLogic due to struct type mismatch
-- **Reverted**: Restored SandboxCharacter_CMC.uasset from git
+### Key Lessons
+- **NEVER add BP interface to a class that already implements the C++ UINTERFACE** — causes "Cannot order parameters" errors and empty override graphs that shadow C++ implementations
+- **NEVER use `ImplementNewInterface` when C++ parent already provides the functions** — creates empty graphs returning zeroes
+- **`break_orphaned_pins` on data pins is DESTRUCTIVE** — removes connected struct parameter pins. Only safe on Return Nodes.
+- **K2Node_Message stores interface class in `FunctionReference.MemberParent`** — use `SetExternalMember()` to retarget
+- **BP interface and C++ UINTERFACE are completely separate UClass objects** — `ImplementsInterface()` checks for one specific class
+- **Parameter names with spaces (BP) vs camelCase (C++) cause compiler conflicts** — the BP compiler can't merge them

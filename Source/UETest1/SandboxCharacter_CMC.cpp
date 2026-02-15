@@ -15,6 +15,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "HAL/IConsoleManager.h"
 
 ASandboxCharacter_CMC::ASandboxCharacter_CMC()
 {
@@ -109,6 +110,30 @@ void ASandboxCharacter_CMC::BeginPlay()
 			CachedSmartObjectAnimation = Component;
 		}
 	}
+
+	// Set tick prerequisite: CharacterMovement ticks after AC_PreCMCTick
+	if (CachedPreCMCTick && GetCharacterMovement())
+	{
+		GetCharacterMovement()->PrimaryComponentTick.AddPrerequisite(CachedPreCMCTick, CachedPreCMCTick->PrimaryComponentTick);
+
+		// Bind to PreCMCTick delegate for pre-movement updates
+		CachedPreCMCTick->Tick.AddDynamic(this, &ASandboxCharacter_CMC::OnPreCMCTick);
+		bPreCMCTickBound = true;
+	}
+
+	// For simulated proxies: bind to OnCharacterMovementUpdated to detect ground transitions
+	if (GetLocalRole() == ROLE_SimulatedProxy)
+	{
+		OnCharacterMovementUpdated.AddDynamic(this, &ASandboxCharacter_CMC::OnMovementUpdatedSimulated);
+	}
+
+	// Set input mode to game-only so mouse is captured for camera look
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		PC->SetInputMode(FInputModeGameOnly());
+		PC->SetShowMouseCursor(false);
+	}
+
 }
 
 void ASandboxCharacter_CMC::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -187,28 +212,60 @@ void ASandboxCharacter_CMC::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// Fallback: if PreCMCTick delegate wasn't bound, run movement updates here
+	if (!bPreCMCTickBound)
+	{
+		OnPreCMCTick();
+	}
+
+	// Traversal check - call TryTraversalAction each frame (was previously in BP event graph Tick)
+	if (CachedTraversalLogic && !IsRagdolling)
+	{
+		FBoolProperty* DoingProp = CastField<FBoolProperty>(
+			CachedTraversalLogic->GetClass()->FindPropertyByName(TEXT("DoingTraversalAction")));
+		bool bDoingTraversal = DoingProp ? DoingProp->GetPropertyValue_InContainer(CachedTraversalLogic) : false;
+
+		if (!bDoingTraversal)
+		{
+			UFunction* TryFunc = CachedTraversalLogic->FindFunction(TEXT("TryTraversalAction"));
+			if (TryFunc)
+			{
+				FS_TraversalCheckInputs Inputs = GetTraversalCheckInputs();
+				uint8* Params = (uint8*)FMemory_Alloca(TryFunc->ParmsSize);
+				FMemory::Memzero(Params, TryFunc->ParmsSize);
+				for (TFieldIterator<FProperty> It(TryFunc); It; ++It)
+				{
+					if (It->HasAnyPropertyFlags(CPF_Parm) && It->GetFName() == FName(TEXT("Inputs")))
+					{
+						It->CopyCompleteValue(It->ContainerPtrToValuePtr<void>(Params), &Inputs);
+						break;
+					}
+				}
+				CachedTraversalLogic->ProcessEvent(TryFunc, Params);
+			}
+		}
+	}
+}
+
+void ASandboxCharacter_CMC::OnPreCMCTick()
+{
+	// Called before CharacterMovementComponent ticks each frame
+	// Matches the BP's PreCMCTick custom event flow
+
+	// Update rotation settings based on strafe/aim state and falling
+	UpdateRotation_PreCMC();
+
 	// Update Gait based on input and sprint conditions
 	Gait = GetDesiredGait();
 
 	// Update movement physics properties
 	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
 	{
-		// Set max speed based on gait and direction
 		CMC->MaxWalkSpeed = CalculateMaxSpeed();
-
-		// Set crouch speed
 		CMC->MaxWalkSpeedCrouched = CalculateMaxCrouchSpeed();
-
-		// Set acceleration
 		CMC->MaxAcceleration = CalculateMaxAcceleration();
-
-		// Set braking deceleration
 		CMC->BrakingDecelerationWalking = CalculateBrakingDeceleration();
-
-		// Set braking friction
 		CMC->BrakingFrictionFactor = CalculateBrakingFriction();
-
-		// Set ground friction
 		CMC->GroundFriction = CalculateGroundFriction();
 	}
 }
@@ -220,14 +277,14 @@ FS_CharacterPropertiesForAnimation ASandboxCharacter_CMC::Get_PropertiesForAnima
 	Props.InputState = CharacterInputState;
 	Props.Gait = Gait;
 	Props.Velocity = GetVelocity();
-	Props.InputAcceleration = GetCharacterMovement() ? GetCharacterMovement()->GetCurrentAcceleration() : FVector::ZeroVector;
 	Props.ActorTransform = GetActorTransform();
 	Props.JustLanded = JustLanded;
 	Props.LandVelocity = LandVelocity;
-	// Determine movement mode from CharacterMovement state
-	if (GetCharacterMovement())
+
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
 	{
-		if (GetCharacterMovement()->IsFalling())
+		// Movement mode
+		if (CMC->IsFalling())
 		{
 			Props.MovementMode = E_MovementMode::InAir;
 		}
@@ -235,7 +292,48 @@ FS_CharacterPropertiesForAnimation ASandboxCharacter_CMC::Get_PropertiesForAnima
 		{
 			Props.MovementMode = E_MovementMode::OnGround;
 		}
+
+		Props.InputAcceleration = CMC->GetCurrentAcceleration();
+		Props.CurrentMaxAcceleration = CMC->MaxAcceleration;
+		Props.CurrentMaxDeceleration = CMC->BrakingDecelerationWalking;
 	}
+
+	// Stance
+	Props.Stance = bIsCrouched ? E_Stance::Crouch : E_Stance::Stand;
+
+	// Rotation mode
+	if (CharacterInputState.WantsToAim)
+	{
+		Props.RotationMode = E_RotationMode::Aim;
+	}
+	else if (CharacterInputState.WantsToStrafe)
+	{
+		Props.RotationMode = E_RotationMode::Strafe;
+	}
+	else
+	{
+		Props.RotationMode = E_RotationMode::OrientToMovement;
+	}
+
+	// Aiming rotation (control rotation)
+	if (Controller)
+	{
+		Props.AimingRotation = Controller->GetControlRotation();
+	}
+
+	// Orientation intent (actor rotation)
+	Props.OrientationIntent = GetActorRotation();
+
+	// Ground info
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		if (CMC->CurrentFloor.IsWalkableFloor())
+		{
+			Props.GroundNormal = CMC->CurrentFloor.HitResult.ImpactNormal;
+			Props.GroundLocation = CMC->CurrentFloor.HitResult.ImpactPoint;
+		}
+	}
+
 	return Props;
 }
 
@@ -552,10 +650,9 @@ void ASandboxCharacter_CMC::OnLook(const FInputActionValue& Value)
 
 void ASandboxCharacter_CMC::OnLookGamepad(const FInputActionValue& Value)
 {
-	// Get the 2D input value
-	FVector2D LookAxisVector = Value.Get<FVector2D>();
+	// Get the 2D input value, scaled by delta time for framerate-independent rotation
+	FVector2D LookAxisVector = Value.Get<FVector2D>() * GetWorld()->GetDeltaSeconds();
 
-	// Add yaw and pitch input (same as OnLook for now)
 	AddControllerYawInput(LookAxisVector.X);
 	AddControllerPitchInput(LookAxisVector.Y);
 }
@@ -568,8 +665,11 @@ void ASandboxCharacter_CMC::OnSprint(const FInputActionValue& Value)
 
 void ASandboxCharacter_CMC::OnWalk(const FInputActionValue& Value)
 {
-	// Toggle walk state
-	CharacterInputState.WantsToWalk = !CharacterInputState.WantsToWalk;
+	// Toggle walk only if not sprinting (matches BP behavior)
+	if (!CharacterInputState.WantsToSprint)
+	{
+		CharacterInputState.WantsToWalk = !CharacterInputState.WantsToWalk;
+	}
 }
 
 void ASandboxCharacter_CMC::OnJumpAction(const FInputActionValue& Value)
@@ -586,14 +686,17 @@ void ASandboxCharacter_CMC::OnJumpReleased(const FInputActionValue& Value)
 
 void ASandboxCharacter_CMC::OnCrouchAction(const FInputActionValue& Value)
 {
-	// Toggle crouch state
-	if (bIsCrouched)
+	// Toggle crouch only when not falling (matches BP behavior)
+	if (GetCharacterMovement() && !GetCharacterMovement()->IsFalling())
 	{
-		UnCrouch();
-	}
-	else
-	{
-		Crouch();
+		if (bIsCrouched)
+		{
+			UnCrouch();
+		}
+		else
+		{
+			Crouch();
+		}
 	}
 }
 
@@ -607,6 +710,32 @@ void ASandboxCharacter_CMC::OnAim(const FInputActionValue& Value)
 {
 	// Set aim flag in input state
 	CharacterInputState.WantsToAim = Value.Get<bool>();
+}
+
+// ===== POSSESSION & LIFECYCLE =====
+
+void ASandboxCharacter_CMC::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+
+	// Setup camera after possession (matches BP Possessed_Client chain)
+	SetupCamera();
+}
+
+void ASandboxCharacter_CMC::OnWalkingOffLedge_Implementation(const FVector& PreviousFloorImpactNormal, const FVector& PreviousFloorContactNormal, const FVector& PreviousLocation, float TimeDelta)
+{
+	UnCrouch();
+}
+
+void ASandboxCharacter_CMC::OnMovementUpdatedSimulated(float DeltaSeconds, FVector OldLocation, FVector OldVelocity)
+{
+	// For simulated proxies: detect ground state transitions
+	UpdatedMovementSimulated(OldVelocity);
+}
+
+void ASandboxCharacter_CMC::UpdateInputState_Server_Implementation(FS_PlayerInputState NewInputState)
+{
+	CharacterInputState = NewInputState;
 }
 
 // ===== PHYSICS EVENTS =====
@@ -629,4 +758,237 @@ void ASandboxCharacter_CMC::Landed(const FHitResult& Hit)
 void ASandboxCharacter_CMC::ResetJustLanded()
 {
 	JustLanded = false;
+}
+
+// ===== CAMERA & ROTATION =====
+
+void ASandboxCharacter_CMC::SetupCamera()
+{
+	// Cache player controller
+	CachedPlayerController = Cast<APlayerController>(GetController());
+
+	if (!CachedPlayerController)
+	{
+		return;
+	}
+
+	// Re-cache camera components if not found yet (PossessedBy may run before BeginPlay finishes caching)
+	if (!CachedCamera)
+	{
+		CachedCamera = FindComponentByClass<UCameraComponent>();
+	}
+	if (!CachedSpringArm)
+	{
+		CachedSpringArm = FindComponentByClass<USpringArmComponent>();
+	}
+	if (!CachedGameplayCamera)
+	{
+		TArray<UActorComponent*> AllComponents;
+		GetComponents(AllComponents);
+		for (UActorComponent* Component : AllComponents)
+		{
+			if (Component->GetName().Contains(TEXT("GameplayCamera")))
+			{
+				CachedGameplayCamera = Component;
+				break;
+			}
+		}
+	}
+
+	// Check CVar for new GameplayCamera system
+	static const auto* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("DDCVar.NewGameplayCameraSystem.Enable"));
+	const bool bUseGameplayCamera = CVar && CVar->GetBool();
+
+	if (bUseGameplayCamera && CachedGameplayCamera)
+	{
+		// Activate GameplayCamera via reflection (BP-only component)
+		static const FName ActivateFuncName(TEXT("ActivateCameraForPlayerController"));
+		if (UFunction* Func = CachedGameplayCamera->FindFunction(ActivateFuncName))
+		{
+			struct FActivateParams
+			{
+				APlayerController* PlayerController;
+			};
+			FActivateParams Params;
+			Params.PlayerController = CachedPlayerController;
+			CachedGameplayCamera->ProcessEvent(Func, &Params);
+		}
+	}
+	else if (CachedCamera)
+	{
+		// Fallback: activate the default camera and set view target
+		CachedCamera->Activate();
+		CachedPlayerController->SetViewTargetWithBlend(this);
+	}
+}
+
+void ASandboxCharacter_CMC::UpdateRotation_PreCMC()
+{
+	UCharacterMovementComponent* CMC = GetCharacterMovement();
+	if (!CMC)
+	{
+		return;
+	}
+
+	// Set rotation mode based on strafe/aim input
+	const bool bWantsStrafe = CharacterInputState.WantsToStrafe || CharacterInputState.WantsToAim;
+	if (bWantsStrafe)
+	{
+		CMC->bUseControllerDesiredRotation = true;
+		CMC->bOrientRotationToMovement = false;
+	}
+	else
+	{
+		CMC->bUseControllerDesiredRotation = false;
+		CMC->bOrientRotationToMovement = true;
+	}
+
+	// Set rotation rate based on movement state
+	if (CMC->IsFalling())
+	{
+		CMC->RotationRate = FRotator(0.0, 200.0, 0.0);
+	}
+	else
+	{
+		// -1 rotation rate causes instant rotation, letting the animation blueprint
+		// handle root bone rotation independently (stick flicks, pivots, turn-in-place)
+		CMC->RotationRate = FRotator(0.0, -1.0, 0.0);
+	}
+}
+
+// ===== TRAVERSAL =====
+
+FS_TraversalCheckInputs ASandboxCharacter_CMC::GetTraversalCheckInputs_Implementation()
+{
+	FS_TraversalCheckInputs Result;
+	Result.TraceForwardDirection = GetActorForwardVector();
+
+	UCharacterMovementComponent* CMC = GetCharacterMovement();
+	if (!CMC)
+	{
+		return Result;
+	}
+
+	const EMovementMode MoveMode = CMC->MovementMode;
+
+	if (MoveMode == MOVE_Falling || MoveMode == MOVE_Flying)
+	{
+		// In air: fixed forward distance, higher half-height, end offset up
+		Result.TraceForwardDistance = 75.0;
+		Result.TraceEndOffset = FVector(0.0, 0.0, 50.0);
+		Result.TraceRadius = 30.0;
+		Result.TraceHalfHeight = 86.0;
+	}
+	else
+	{
+		// On ground: scale forward distance based on forward speed
+		const FVector UnrotatedVelocity = GetActorRotation().UnrotateVector(CMC->Velocity);
+		Result.TraceForwardDistance = UKismetMathLibrary::MapRangeClamped(
+			UnrotatedVelocity.X, 0.0, 500.0, 75.0, 350.0);
+		Result.TraceRadius = 30.0;
+		Result.TraceHalfHeight = 60.0;
+	}
+
+	return Result;
+}
+
+// ===== SIMULATED PROXY =====
+
+void ASandboxCharacter_CMC::UpdatedMovementSimulated(FVector OldVelocity)
+{
+	UCharacterMovementComponent* CMC = GetCharacterMovement();
+	if (!CMC)
+	{
+		return;
+	}
+
+	// Update ground state
+	IsMovingOnGround = CMC->IsMovingOnGround();
+
+	// Detect ground state transitions
+	if (IsMovingOnGround != WasMovingOnGroundLastFrame_Simulated)
+	{
+		if (IsMovingOnGround)
+		{
+			// Transitioned to ground = simulated landing
+			CustomOnLandedEvent(OldVelocity);
+		}
+		else
+		{
+			// Transitioned to air = simulated jump
+			CustomOnJumpedEvent(OldVelocity.Size2D());
+		}
+	}
+
+	// Store for next frame comparison
+	WasMovingOnGroundLastFrame_Simulated = IsMovingOnGround;
+}
+
+void ASandboxCharacter_CMC::CustomOnLandedEvent(FVector InLandVelocity)
+{
+	JustLanded = true;
+	LandVelocity = InLandVelocity;
+
+	GetWorldTimerManager().ClearTimer(JustLandedTimerHandle);
+	GetWorldTimerManager().SetTimer(
+		JustLandedTimerHandle, this, &ASandboxCharacter_CMC::ResetJustLanded, 0.3f, false);
+}
+
+void ASandboxCharacter_CMC::CustomOnJumpedEvent(double GroundSpeedBeforeJump)
+{
+	// Simulated proxy jump event - state tracked via IsMovingOnGround
+	// GroundSpeedBeforeJump available for animation systems if needed
+}
+
+// ===== RAGDOLL =====
+
+void ASandboxCharacter_CMC::Ragdoll_Start()
+{
+	UCharacterMovementComponent* CMC = GetCharacterMovement();
+
+	// Disable movement and set ragdolling state
+	if (CMC)
+	{
+		CMC->SetMovementMode(MOVE_None);
+	}
+	IsRagdolling = true;
+
+	// Disable capsule collision
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	// Enable mesh physics
+	if (USkeletalMeshComponent* SkelMesh = GetMesh())
+	{
+		SkelMesh->SetCollisionObjectType(ECC_PhysicsBody);
+		SkelMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		SkelMesh->SetAllBodiesBelowSimulatePhysics(FName(TEXT("pelvis")), true);
+	}
+}
+
+void ASandboxCharacter_CMC::Ragdoll_End()
+{
+	IsRagdolling = false;
+
+	// Restore movement mode
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		CMC->SetMovementMode(MOVE_Falling);
+	}
+
+	// Restore capsule collision
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	}
+
+	// Restore mesh collision and disable physics
+	if (USkeletalMeshComponent* SkelMesh = GetMesh())
+	{
+		SkelMesh->SetCollisionObjectType(ECC_Pawn);
+		SkelMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		SkelMesh->SetAllBodiesSimulatePhysics(false);
+	}
 }

@@ -1,187 +1,91 @@
 #include "SandboxCharacter_CMC_ABP.h"
-#include "BFL_HelpfulFunctions.h"
-#include "GameFramework/Character.h"
-#include "Kismet/KismetSystemLibrary.h"
+#include "BPI_SandboxCharacter_Pawn.h"
 
 void USandboxCharacter_CMC_ABP::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
 
-	// Check if we have a valid owning actor
-	APawn* OwningPawn = TryGetPawnOwner();
-	HasOwningActor = (OwningPawn != nullptr);
+	AActor* Owner = GetOwningActor();
+	if (!Owner) return;
 
-	if (!HasOwningActor)
+	bool bImplements = Owner->GetClass()->ImplementsInterface(UBPI_SandboxCharacter_Pawn::StaticClass());
+	if (!bImplements) return;
+
+	// Get interface data every frame
+	FS_CharacterPropertiesForAnimation Props = IBPI_SandboxCharacter_Pawn::Execute_Get_PropertiesForAnimation(Owner);
+	double Speed2D = FVector(Props.Velocity.X, Props.Velocity.Y, 0.0).Size();
+
+	// Call BP update functions for animation pipeline
 	{
-		return;
+		UFunction* UpdatePropsFunc = GetClass()->FindFunctionByName(TEXT("Update_PropertiesFromCharacter"));
+		UFunction* UpdateLogicFunc = GetClass()->FindFunctionByName(TEXT("Update_Logic"));
+		UFunction* UpdateTrajFunc = GetClass()->FindFunctionByName(TEXT("Update_Trajectory"));
+		UFunction* UpdateEssFunc = GetClass()->FindFunctionByName(TEXT("Update_EssentialValues"));
+		UFunction* UpdateStatesFunc = GetClass()->FindFunctionByName(TEXT("Update_States"));
+
+		if (UpdatePropsFunc)
+		{
+			ProcessEvent(UpdatePropsFunc, nullptr);
+		}
+		if (UpdateLogicFunc)
+		{
+			ProcessEvent(UpdateLogicFunc, nullptr);
+		}
 	}
 
-	// Update console variable driven variables (thread-safe caching)
-	Update_CVarDrivenVariables();
+	// Directly set BP variables via reflection every frame
+	auto SetDoubleProperty = [this](const TCHAR* Name, double Value) {
+		if (FProperty* Prop = GetClass()->FindPropertyByName(Name))
+		{
+			if (FDoubleProperty* DoubleProp = CastField<FDoubleProperty>(Prop))
+				DoubleProp->SetPropertyValue_InContainer(this, Value);
+			else if (FFloatProperty* FloatProp = CastField<FFloatProperty>(Prop))
+				FloatProp->SetPropertyValue_InContainer(this, (float)Value);
+		}
+	};
 
-	// Get properties from character
-	Update_PropertiesFromCharacter();
+	auto SetByteEnumProperty = [this](const TCHAR* Name, uint8 Value) {
+		if (FProperty* Prop = GetClass()->FindPropertyByName(Name))
+		{
+			if (FByteProperty* ByteProp = CastField<FByteProperty>(Prop))
+				ByteProp->SetPropertyValue_InContainer(this, Value);
+			else if (FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+			{
+				FNumericProperty* UnderProp = EnumProp->GetUnderlyingProperty();
+				UnderProp->SetIntPropertyValue(EnumProp->ContainerPtrToValuePtr<void>(this), (int64)Value);
+			}
+		}
+	};
 
-	// Update logic (only if not using thread-safe animation)
-	if (!UseThreadSafeUpdateAnimation)
+	auto SetBoolProperty = [this](const TCHAR* Name, bool Value) {
+		if (FBoolProperty* Prop = CastField<FBoolProperty>(GetClass()->FindPropertyByName(Name)))
+		{
+			Prop->SetPropertyValue_InContainer(this, Value);
+		}
+	};
+
+	// Essential values
+	SetDoubleProperty(TEXT("Speed2D"), Speed2D);
+	SetByteEnumProperty(TEXT("Gait"), (uint8)Props.Gait);
+	SetByteEnumProperty(TEXT("MovementMode"), (uint8)Props.MovementMode);
+	SetByteEnumProperty(TEXT("Stance"), (uint8)Props.Stance);
+	SetByteEnumProperty(TEXT("RotationMode"), (uint8)Props.RotationMode);
+
+	// Movement state: Idle vs Moving based on speed
+	uint8 MovState = Speed2D > 1.0 ? 1 : 0; // 0=Idle, 1=Moving
+	SetByteEnumProperty(TEXT("MovementState"), MovState);
+
+	// HasOwningActor
+	SetBoolProperty(TEXT("HasOwningActor"), true);
+
+	// Velocity-related
+	SetDoubleProperty(TEXT("Speed"), Props.Velocity.Size());
+
+	// Additional commonly needed values
+	if (FStructProperty* CharPropsProp = CastField<FStructProperty>(GetClass()->FindPropertyByName(TEXT("CharacterProperties"))))
 	{
-		Update_Logic();
-	}
-}
-
-void USandboxCharacter_CMC_ABP::NativePostEvaluateAnimation()
-{
-	Super::NativePostEvaluateAnimation();
-
-	if (HasOwningActor && DebugExperimentalStateMachine)
-	{
-		Debug_ExperimentalStateMachine();
-	}
-}
-
-void USandboxCharacter_CMC_ABP::Update_CVarDrivenVariables()
-{
-	// Cache console variables for thread-safe access
-	OffsetRootBoneEnabled = UKismetSystemLibrary::GetConsoleVariableBoolValue(TEXT("a.animnode.offsetrootbone.enable"));
-	MMDatabaseLOD = UKismetSystemLibrary::GetConsoleVariableIntValue(TEXT("DDCvar.MMDatabaseLOD"));
-	OffsetRootTranslationRadius = UKismetSystemLibrary::GetConsoleVariableFloatValue(TEXT("DDCvar.OffsetRootBone.TranslationRadius"));
-	UseThreadSafeUpdateAnimation = UKismetSystemLibrary::GetConsoleVariableBoolValue(TEXT("DDCVar.ThreadSafeAnimationUpdate.Enable"));
-	DebugExperimentalStateMachine = UKismetSystemLibrary::GetConsoleVariableBoolValue(TEXT("DDCvar.DrawCharacterDebugShapes"));
-
-	// Get experimental state machine setting
-	bool ExperimentalStateMachineEnabled = UKismetSystemLibrary::GetConsoleVariableBoolValue(TEXT("DDCVar.ExperimentalStateMachine.Enable"));
-
-	// Check for component tags
-	USkeletalMeshComponent* SkelMeshComp = GetOwningComponent();
-	bool ForceStateMachineSetup = SkelMeshComp && SkelMeshComp->ComponentHasTag(TEXT("Force SM Setup"));
-	bool ForceMMSetup = SkelMeshComp && SkelMeshComp->ComponentHasTag(TEXT("Force MM Setup"));
-
-	UseExperimentalStateMachine = (ExperimentalStateMachineEnabled || ForceStateMachineSetup) && !ForceMMSetup;
-
-	// Get locomotion setup and convert to bool for UseExperimentalStateMachine
-	LocomotionSetup = UKismetSystemLibrary::GetConsoleVariableIntValue(TEXT("DDCVar.LocomotionSetupCMC"));
-	UseExperimentalStateMachine = (LocomotionSetup != 0);
-}
-
-void USandboxCharacter_CMC_ABP::Update_PropertiesFromCharacter()
-{
-	// Get properties from character via interface
-	AActor* OwningActor = GetOwningActor();
-	if (!OwningActor)
-	{
-		return;
-	}
-
-	// Call Get_PropertiesForAnimation interface function (implemented in character class)
-	// This requires the character to implement BPI_SandboxCharacter_Pawn interface
-	// For now, stub this out - the actual interface call will be implemented
-	// when we verify the character class has the C++ implementation
-
-	// TODO: Implement interface call when character C++ is ready
-	// CharacterProperties = OwningActor->Get_PropertiesForAnimation();
-}
-
-void USandboxCharacter_CMC_ABP::Update_Logic()
-{
-	// Main update logic sequence
-	Update_Trajectory();
-	Update_EssentialValues();
-	Update_States();
-
-	// Only update direction and rotation if using experimental state machine
-	if (UseExperimentalStateMachine)
-	{
-		Update_MovementDirection();
-		Update_TargetRotation();
-	}
-}
-
-void USandboxCharacter_CMC_ABP::Update_Trajectory()
-{
-	// TODO: Implement trajectory update logic from blueprint
-	// This will update Trajectory, TrajectoryGenerationData_Idle, TrajectoryGenerationData_Moving
-}
-
-void USandboxCharacter_CMC_ABP::Update_EssentialValues()
-{
-	// TODO: Implement essential values update from blueprint
-	// This will update movement state, velocity, acceleration, etc.
-}
-
-void USandboxCharacter_CMC_ABP::Update_States()
-{
-	// Save current values to last frame variables
-	MovementMode_LastFrame = MovementMode;
-	RotationMode_LastFrame = RotationMode;
-	MovementState_LastFrame = MovementState;
-	Gait_LastFrame = Gait;
-	Stance_LastFrame = Stance;
-
-	// Update current values from CharacterProperties
-	MovementMode = CharacterProperties.MovementMode;
-	RotationMode = CharacterProperties.RotationMode;
-	Gait = CharacterProperties.Gait;
-	Stance = CharacterProperties.Stance;
-
-	// Update MovementState based on whether character is moving
-	// IsMoving() checks if the character has velocity
-	if (Speed2D > 0.0)
-	{
-		MovementState = E_MovementState::Moving;
-	}
-	else
-	{
-		MovementState = E_MovementState::Idle;
-	}
-}
-
-void USandboxCharacter_CMC_ABP::Update_MovementDirection()
-{
-	// TODO: Implement movement direction update from blueprint
-	// This will update MovementDirection, MovementDirectionBias, etc.
-}
-
-void USandboxCharacter_CMC_ABP::Update_TargetRotation()
-{
-	// TODO: Implement target rotation update from blueprint
-	// This will update TargetRotation, TargetRotationDelta, etc.
-}
-
-void USandboxCharacter_CMC_ABP::Debug_ExperimentalStateMachine()
-{
-	// TODO: Implement debug visualization from blueprint
-	// This is a large function with debug drawing logic
-}
-
-void USandboxCharacter_CMC_ABP::DebugDraws()
-{
-	APawn* OwningPawn = TryGetPawnOwner();
-	if (!OwningPawn)
-	{
-		return;
+		void* StructPtr = CharPropsProp->ContainerPtrToValuePtr<void>(this);
+		CharPropsProp->CopyCompleteValue(StructPtr, &Props);
 	}
 
-	FVector Location = OwningPawn->GetActorLocation();
-	FRotator Rotation = OwningPawn->GetActorRotation();
-	FVector Offset(100.0f, 0.0f, 100.0f);
-
-	// Debug drawing will be implemented based on blueprint requirements
-	// This replaces the blueprint nodes that had orphaned pins
-
-	// Example: Draw debug string arrays
-	TArray<FString> DebugStrings;
-	DebugStrings.Add(TEXT("CMC Animation Blueprint"));
-	DebugStrings.Add(FString::Printf(TEXT("DeltaTime: %.3f"), GetWorld()->GetDeltaSeconds()));
-
-	UBFL_HelpfulFunctions::DebugDraw_StringArray(
-		this,
-		Location,
-		Rotation,
-		Offset,
-		TEXT("CMC Debug"),
-		TEXT("  "),
-		DebugStrings,
-		TEXT(""),  // HighlightedString - using correct parameter name
-		TEXT(">>")
-	);
 }
