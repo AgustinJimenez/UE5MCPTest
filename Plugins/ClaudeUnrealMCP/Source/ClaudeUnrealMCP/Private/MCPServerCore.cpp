@@ -344,6 +344,7 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 		{TEXT("reconstruct_actor"), &FMCPServer::HandleReconstructActor},
 		{TEXT("clear_component_map_value_array"), &FMCPServer::HandleClearComponentMapValueArray},
 		{TEXT("replace_component_class"), &FMCPServer::HandleReplaceComponentClass},
+		{TEXT("delete_component"), &FMCPServer::HandleDeleteComponent},
 		{TEXT("set_blueprint_cdo_property"), &FMCPServer::HandleSetBlueprintCDOProperty},
 		{TEXT("remove_implemented_interface"), &FMCPServer::HandleRemoveImplementedInterface},
 		{TEXT("add_implemented_interface"), &FMCPServer::HandleAddImplementedInterface},

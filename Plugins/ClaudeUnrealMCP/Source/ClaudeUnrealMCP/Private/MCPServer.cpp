@@ -3744,6 +3744,64 @@ FString FMCPServer::HandleReplaceComponentClass(const TSharedPtr<FJsonObject>& P
 	return MakeResponse(true, Data);
 }
 
+
+FString FMCPServer::HandleDeleteComponent(const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Params.IsValid())
+	{
+		return MakeError(TEXT("Missing parameters"));
+	}
+
+	FString BlueprintPath = Params->GetStringField(TEXT("blueprint_path"));
+	if (BlueprintPath.IsEmpty())
+	{
+		BlueprintPath = Params->GetStringField(TEXT("path"));
+	}
+	FString ComponentName = Params->GetStringField(TEXT("component_name"));
+
+	if (BlueprintPath.IsEmpty() || ComponentName.IsEmpty())
+	{
+		return MakeError(TEXT("Missing 'blueprint_path' or 'component_name' parameter"));
+	}
+
+	UBlueprint* Blueprint = LoadBlueprintFromPath(BlueprintPath);
+	if (!Blueprint)
+	{
+		return MakeError(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+	}
+
+	if (!Blueprint->SimpleConstructionScript)
+	{
+		return MakeError(TEXT("Blueprint has no SimpleConstructionScript"));
+	}
+
+	USCS_Node* TargetNode = nullptr;
+	for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+	{
+		if (Node && Node->GetVariableName().ToString() == ComponentName)
+		{
+			TargetNode = Node;
+			break;
+		}
+	}
+
+	if (!TargetNode)
+	{
+		return MakeError(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+	}
+
+	// Remove the node from the SCS
+	Blueprint->SimpleConstructionScript->RemoveNode(TargetNode);
+
+	// Mark the blueprint as modified
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("deleted_component"), ComponentName);
+	Data->SetStringField(TEXT("message"), FString::Printf(TEXT("Successfully deleted component: %s"), *ComponentName));
+
+	return MakeResponse(true, Data);
+}
 FString FMCPServer::HandleSetBlueprintCDOProperty(const TSharedPtr<FJsonObject>& Params)
 {
 	if (!Params.IsValid())

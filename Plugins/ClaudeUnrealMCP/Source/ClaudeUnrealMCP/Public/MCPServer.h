@@ -84,6 +84,7 @@ private:
 	// Component map value manipulation (Sprint 3)
 	FString HandleClearComponentMapValueArray(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReplaceComponentClass(const TSharedPtr<FJsonObject>& Params);
+	FString HandleDeleteComponent(const TSharedPtr<FJsonObject>& Params);
 
 	// Blueprint CDO property manipulation (Sprint 4)
 	FString HandleSetBlueprintCDOProperty(const TSharedPtr<FJsonObject>& Params);
