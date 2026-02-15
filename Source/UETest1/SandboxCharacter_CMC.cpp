@@ -187,7 +187,7 @@ void ASandboxCharacter_CMC::SetupPlayerInputComponent(UInputComponent* PlayerInp
 
 		if (IA_Jump)
 		{
-			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Started, this, &ASandboxCharacter_CMC::OnJumpAction);
+			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Triggered, this, &ASandboxCharacter_CMC::OnJumpAction);
 			EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Completed, this, &ASandboxCharacter_CMC::OnJumpReleased);
 		}
 
@@ -218,33 +218,8 @@ void ASandboxCharacter_CMC::Tick(float DeltaTime)
 		OnPreCMCTick();
 	}
 
-	// Traversal check - call TryTraversalAction each frame (was previously in BP event graph Tick)
-	if (CachedTraversalLogic && !IsRagdolling)
-	{
-		FBoolProperty* DoingProp = CastField<FBoolProperty>(
-			CachedTraversalLogic->GetClass()->FindPropertyByName(TEXT("DoingTraversalAction")));
-		bool bDoingTraversal = DoingProp ? DoingProp->GetPropertyValue_InContainer(CachedTraversalLogic) : false;
-
-		if (!bDoingTraversal)
-		{
-			UFunction* TryFunc = CachedTraversalLogic->FindFunction(TEXT("TryTraversalAction"));
-			if (TryFunc)
-			{
-				FS_TraversalCheckInputs Inputs = GetTraversalCheckInputs();
-				uint8* Params = (uint8*)FMemory_Alloca(TryFunc->ParmsSize);
-				FMemory::Memzero(Params, TryFunc->ParmsSize);
-				for (TFieldIterator<FProperty> It(TryFunc); It; ++It)
-				{
-					if (It->HasAnyPropertyFlags(CPF_Parm) && It->GetFName() == FName(TEXT("Inputs")))
-					{
-						It->CopyCompleteValue(It->ContainerPtrToValuePtr<void>(Params), &Inputs);
-						break;
-					}
-				}
-				CachedTraversalLogic->ProcessEvent(TryFunc, Params);
-			}
-		}
-	}
+	// Note: Traversal is NOT checked here. In the original BP, TryTraversalAction
+	// is called from the IA_Jump input handler, not from Tick. See OnJumpAction().
 }
 
 void ASandboxCharacter_CMC::OnPreCMCTick()
@@ -674,7 +649,60 @@ void ASandboxCharacter_CMC::OnWalk(const FInputActionValue& Value)
 
 void ASandboxCharacter_CMC::OnJumpAction(const FInputActionValue& Value)
 {
-	// Call base character Jump()
+	// Original BP flow: IA_Jump -> gate check -> TryTraversalAction -> fallback to Jump()
+	// Gate: NOT IsFalling AND NOT DoingTraversalAction AND NOT IsRagdolling
+	UCharacterMovementComponent* CMC = GetCharacterMovement();
+	bool bIsFalling = CMC && CMC->IsFalling();
+
+	bool bDoingTraversal = false;
+	if (CachedTraversalLogic)
+	{
+		FBoolProperty* DoingProp = CastField<FBoolProperty>(
+			CachedTraversalLogic->GetClass()->FindPropertyByName(TEXT("DoingTraversalAction")));
+		bDoingTraversal = DoingProp ? DoingProp->GetPropertyValue_InContainer(CachedTraversalLogic) : false;
+	}
+
+	if (CachedTraversalLogic && !bIsFalling && !bDoingTraversal && !IsRagdolling)
+	{
+		// Try traversal action
+		UFunction* TryFunc = CachedTraversalLogic->FindFunction(TEXT("TryTraversalAction"));
+		if (TryFunc)
+		{
+			// Build params struct
+			FS_TraversalCheckInputs Inputs = GetTraversalCheckInputs();
+			uint8* Params = (uint8*)FMemory_Alloca(TryFunc->ParmsSize);
+			FMemory::Memzero(Params, TryFunc->ParmsSize);
+
+			// Find and set the Inputs parameter
+			for (TFieldIterator<FProperty> It(TryFunc); It; ++It)
+			{
+				if (It->HasAnyPropertyFlags(CPF_Parm) && It->GetFName() == FName(TEXT("Inputs")))
+				{
+					It->CopyCompleteValue(It->ContainerPtrToValuePtr<void>(Params), &Inputs);
+					break;
+				}
+			}
+
+			CachedTraversalLogic->ProcessEvent(TryFunc, Params);
+
+			// Check output: if traversal failed, fall back to jump
+			// TryTraversalAction has two failure exec pins: TraversalCheckFailed and MontageSelectionFailed
+			// Both mean no traversal happened, so we should jump instead
+			// The function sets DoingTraversalAction=true only on success (via PerformTraversalAction)
+			FBoolProperty* DoingPropAfter = CastField<FBoolProperty>(
+				CachedTraversalLogic->GetClass()->FindPropertyByName(TEXT("DoingTraversalAction")));
+			bool bTraversalStarted = DoingPropAfter ? DoingPropAfter->GetPropertyValue_InContainer(CachedTraversalLogic) : false;
+
+			if (!bTraversalStarted)
+			{
+				// Traversal check failed or no montage found — do a regular jump
+				Jump();
+			}
+			return;
+		}
+	}
+
+	// Default: regular jump
 	Jump();
 }
 
