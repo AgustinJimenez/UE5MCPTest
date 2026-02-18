@@ -1229,6 +1229,82 @@ export const MCP_TOOL_DEFINITIONS = [
           required: ["source_enum_path", "target_enum_path"],
         },
       },
+      {
+        name: "fix_optional_struct_pin_defaults",
+        description: "Fix invalid enum default values stored in optional struct pins (hidden SetFieldsInStruct/MakeStruct pins). Replaces NewEnumeratorN with the enum value names.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      {
+        name: "force_fix_enum_pin_defaults",
+        description: "Force-fix enum pin defaults that still use NewEnumeratorN by remapping to the enum's value names, even when the enum subcategory object is missing.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            enum_path: {
+              type: "string",
+              description: "Full path to the enum (e.g., /Script/UETest1.E_TraversalActionType)",
+            },
+            pin_name_contains: {
+              type: "string",
+              description: "Optional: only fix pins whose names contain this substring (e.g., ActionType)",
+            },
+          },
+          required: ["blueprint_path", "enum_path"],
+        },
+      },
+      {
+        name: "set_struct_field_default",
+        description: "Set the default value for a field in a UserDefinedStruct (by field name or friendly name).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            struct_path: {
+              type: "string",
+              description: "Full path to the UserDefinedStruct asset",
+            },
+            field_name: {
+              type: "string",
+              description: "Field VarName (with GUID) or friendly name",
+            },
+            new_default: {
+              type: "string",
+              description: "New default value string",
+            },
+          },
+          required: ["struct_path", "field_name", "new_default"],
+        },
+      },
+      {
+        name: "clean_property_access_paths",
+        description: "Remove invalid path segments (default: 'None') from K2Node_PropertyAccess Path arrays in a blueprint.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            remove_segment: {
+              type: "string",
+              description: "Segment value to remove from property access paths (default: 'None')",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
       // Sprint 6: Input System Reading
       {
         name: "read_input_mapping_context",

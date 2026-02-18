@@ -105,13 +105,19 @@ private:
 	FString HandleMigrateStructReferences(const TSharedPtr<FJsonObject>& Params);
 	FString HandleMigrateEnumReferences(const TSharedPtr<FJsonObject>& Params);
 	FString HandleFixPropertyAccessPaths(const TSharedPtr<FJsonObject>& Params);
+	FString HandleCleanPropertyAccessPaths(const TSharedPtr<FJsonObject>& Params);
 	FString HandleFixStructSubPins(const TSharedPtr<FJsonObject>& Params);
 	FString HandleRenameLocalVariable(const TSharedPtr<FJsonObject>& Params);
 	FString HandleFixPinEnumType(const TSharedPtr<FJsonObject>& Params);
 	FString HandleFixEnumDefaults(const TSharedPtr<FJsonObject>& Params);
+	FString HandleForceFixEnumPinDefaults(const TSharedPtr<FJsonObject>& Params);
 	FString HandleFixAssetStructReference(const TSharedPtr<FJsonObject>& Params);
 	FString HandleReconstructNode(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSetPinDefault(const TSharedPtr<FJsonObject>& Params);
+	FString HandleRestoreStructNodePins(const TSharedPtr<FJsonObject>& Params);
+	FString HandleFixStructEnumFieldDefaults(const TSharedPtr<FJsonObject>& Params);
+	FString HandleFixOptionalStructPinDefaults(const TSharedPtr<FJsonObject>& Params);
+	FString HandleSetStructFieldDefault(const TSharedPtr<FJsonObject>& Params);
 
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));

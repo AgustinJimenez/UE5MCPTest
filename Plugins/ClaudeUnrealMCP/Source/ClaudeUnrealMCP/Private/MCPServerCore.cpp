@@ -357,13 +357,19 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 		{TEXT("migrate_struct_references"), &FMCPServer::HandleMigrateStructReferences},
 		{TEXT("migrate_enum_references"), &FMCPServer::HandleMigrateEnumReferences},
 		{TEXT("fix_property_access_paths"), &FMCPServer::HandleFixPropertyAccessPaths},
+		{TEXT("clean_property_access_paths"), &FMCPServer::HandleCleanPropertyAccessPaths},
 		{TEXT("fix_struct_sub_pins"), &FMCPServer::HandleFixStructSubPins},
 		{TEXT("rename_local_variable"), &FMCPServer::HandleRenameLocalVariable},
 		{TEXT("fix_pin_enum_type"), &FMCPServer::HandleFixPinEnumType},
 		{TEXT("fix_enum_defaults"), &FMCPServer::HandleFixEnumDefaults},
+		{TEXT("force_fix_enum_pin_defaults"), &FMCPServer::HandleForceFixEnumPinDefaults},
 		{TEXT("fix_asset_struct_reference"), &FMCPServer::HandleFixAssetStructReference},
 		{TEXT("reconstruct_node"), &FMCPServer::HandleReconstructNode},
-		{TEXT("set_pin_default"), &FMCPServer::HandleSetPinDefault}
+		{TEXT("set_pin_default"), &FMCPServer::HandleSetPinDefault},
+		{TEXT("restore_struct_node_pins"), &FMCPServer::HandleRestoreStructNodePins},
+		{TEXT("fix_struct_enum_field_defaults"), &FMCPServer::HandleFixStructEnumFieldDefaults},
+		{TEXT("fix_optional_struct_pin_defaults"), &FMCPServer::HandleFixOptionalStructPinDefaults},
+		{TEXT("set_struct_field_default"), &FMCPServer::HandleSetStructFieldDefault}
 	};
 
 	if (const FCommandHandler* Handler = CommandHandlers.Find(Command))
@@ -438,4 +444,3 @@ void FMCPServer::ReconstructLevelVisuals()
 		}
 	}
 }
-

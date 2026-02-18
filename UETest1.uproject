@@ -98,6 +98,10 @@
 		{
 			"Name": "GameplayInteractions",
 			"Enabled": true
+		},
+		{
+			"Name": "ClaudeUnrealMCP",
+			"Enabled": true
 		}
 	],
 	"EpicSampleNameHash": "1673045636"
