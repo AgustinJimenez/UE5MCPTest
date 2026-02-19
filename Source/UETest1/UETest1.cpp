@@ -3,22 +3,19 @@
 #include "UETest1.h"
 #include "Modules/ModuleManager.h"
 
-// Include struct headers to force registration via StaticStruct()
 #include "CharacterPropertiesStructs.h"
+#include "TraversalTypes.h"
 
 void FUETest1Module::StartupModule()
 {
-    // Force struct registration by calling StaticStruct() on startup
-    // This ensures these C++ structs are discoverable via reflection
-    UE_LOG(LogTemp, Log, TEXT("UETest1 Module: Registering C++ structs for MCP discovery..."));
-
-    // CharacterPropertiesStructs.h - FS_ prefix structs
+    // Force struct registration for MCP discovery
     FS_PlayerInputState::StaticStruct();
     FS_CharacterPropertiesForAnimation::StaticStruct();
     FS_CharacterPropertiesForCamera::StaticStruct();
     FS_CharacterPropertiesForTraversal::StaticStruct();
-
-    UE_LOG(LogTemp, Log, TEXT("UETest1 Module: C++ struct registration complete."));
+    FS_TraversalCheckResult::StaticStruct();
+    FS_TraversalChooserInputs::StaticStruct();
+    FS_TraversalChooserOutputs::StaticStruct();
 }
 
 IMPLEMENT_PRIMARY_GAME_MODULE(FUETest1Module, UETest1, "UETest1");

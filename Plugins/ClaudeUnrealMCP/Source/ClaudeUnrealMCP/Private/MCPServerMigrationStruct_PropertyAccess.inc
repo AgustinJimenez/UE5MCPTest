@@ -55,7 +55,6 @@
 #include "EnhancedInputComponent.h"
 #include "Components/ActorComponent.h"
 #include "Kismet2/ComponentEditorUtils.h"
-#include "LevelVisuals.h"
 #include "MCPServerHelpers.h"
 
 FString FMCPServer::HandleFixPropertyAccessPaths(const TSharedPtr<FJsonObject>& Params)

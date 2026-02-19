@@ -64,12 +64,7 @@ void FClaudeUnrealMCPModule::OnBlueprintCompiled()
 	// The callback fires during compilation, before all objects are ready
 	if (Server)
 	{
-		FMCPServer* ServerPtr = Server;
-		FTimerHandle TimerHandle;
-		GEditor->GetTimerManager()->SetTimer(TimerHandle, [ServerPtr]()
-		{
-			ServerPtr->ReconstructLevelVisuals();
-		}, 0.2f, false); // 200ms delay
+		// Server started successfully
 	}
 }
 

@@ -55,7 +55,6 @@
 #include "EnhancedInputComponent.h"
 #include "Components/ActorComponent.h"
 #include "Kismet2/ComponentEditorUtils.h"
-#include "LevelVisuals.h"
 
 FString FMCPServer::HandleRemoveImplementedInterface(const TSharedPtr<FJsonObject>& Params)
 {

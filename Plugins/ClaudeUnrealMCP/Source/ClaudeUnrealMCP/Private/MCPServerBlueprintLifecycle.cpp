@@ -55,7 +55,6 @@
 #include "EnhancedInputComponent.h"
 #include "Components/ActorComponent.h"
 #include "Kismet2/ComponentEditorUtils.h"
-#include "LevelVisuals.h"
 #include "MCPServerHelpers.h"
 
 FString FMCPServer::HandleReparentBlueprint(const TSharedPtr<FJsonObject>& Params)
@@ -91,9 +90,6 @@ FString FMCPServer::HandleReparentBlueprint(const TSharedPtr<FJsonObject>& Param
 
 	UBlueprintEditorLibrary::ReparentBlueprint(Blueprint, NewParent);
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
-
-	// Auto-reconstruct LevelVisuals to refresh material colors
-	ReconstructLevelVisuals();
 
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
 	Data->SetStringField(TEXT("message"), TEXT("Blueprint reparented successfully"));
@@ -165,9 +161,6 @@ FString FMCPServer::HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Params
 	Data->SetArrayField(TEXT("warnings"), WarningsArray);
 	Data->SetNumberField(TEXT("error_count"), ErrorsArray.Num());
 	Data->SetNumberField(TEXT("warning_count"), WarningsArray.Num());
-
-	// Auto-reconstruct LevelVisuals to refresh material colors
-	ReconstructLevelVisuals();
 
 	// Always return success=true so error details are visible
 	// The 'compiled' field indicates actual compilation status
@@ -283,9 +276,6 @@ FString FMCPServer::HandleSaveAll(const TSharedPtr<FJsonObject>& Params)
 
 	FString Message = FString::Printf(TEXT("Saved %d package(s), %d failed"), SavedCount, FailedCount);
 	Data->SetStringField(TEXT("message"), Message);
-
-	// Auto-reconstruct LevelVisuals to refresh material colors
-	ReconstructLevelVisuals();
 
 	if (FailedCount > 0)
 	{

@@ -47,7 +47,6 @@
 #include "EnhancedInputComponent.h"
 #include "Components/ActorComponent.h"
 #include "Kismet2/ComponentEditorUtils.h"
-#include "LevelVisuals.h"
 
 
 FMCPServer::FMCPServer()
@@ -423,24 +422,3 @@ FString FMCPServer::MakeError(const FString& Error)
 	return MakeResponse(false, nullptr, Error);
 }
 
-void FMCPServer::ReconstructLevelVisuals()
-{
-	// Update LevelVisuals actors to refresh material colors after blueprint operations
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	if (!World)
-	{
-		return;
-	}
-
-	// Use the C++ class directly instead of RerunConstructionScripts
-	// This avoids OnConstruction side effects and just updates materials
-	for (TActorIterator<ALevelVisuals> It(World); It; ++It)
-	{
-		ALevelVisuals* LevelVisuals = *It;
-		if (LevelVisuals)
-		{
-			LevelVisuals->UpdateLevelVisuals();
-			UE_LOG(LogTemp, Log, TEXT("ClaudeUnrealMCP: Updated materials on %s"), *LevelVisuals->GetName());
-		}
-	}
-}

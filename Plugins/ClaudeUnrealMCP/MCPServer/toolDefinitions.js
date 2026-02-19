@@ -1305,6 +1305,20 @@ export const MCP_TOOL_DEFINITIONS = [
           required: ["blueprint_path"],
         },
       },
+      {
+        name: "fix_property_access_paths",
+        description: "Fix PropertyAccess paths after struct migration or invalid field references (e.g., Control Rig warnings).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
       // Sprint 6: Input System Reading
       {
         name: "read_input_mapping_context",
