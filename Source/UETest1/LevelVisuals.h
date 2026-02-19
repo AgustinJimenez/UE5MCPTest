@@ -37,6 +37,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Level Visuals")
 	void UpdateVisuals();
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Level Visuals")
+	FS_LevelStyle GetLevelStyle() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void OnConstruction(const FTransform& Transform) override;

@@ -192,6 +192,15 @@ void ALevelVisuals::UpdateVisuals()
 	UpdateLevelVisuals();
 }
 
+FS_LevelStyle ALevelVisuals::GetLevelStyle() const
+{
+	if (LevelStyles.IsValidIndex(StyleIndex))
+	{
+		return LevelStyles[StyleIndex];
+	}
+	return FS_LevelStyle();
+}
+
 void ALevelVisuals::UpdateLevelVisuals()
 {
 	// Validate StyleIndex - fallback to 0 if invalid
