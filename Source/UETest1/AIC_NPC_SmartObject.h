@@ -18,8 +18,8 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "AI")
-	TObjectPtr<UStateTreeAIComponent> StateTreeAI;
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "AI")
+	TObjectPtr<UStateTreeAIComponent> CachedStateTreeAI;
 
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "AI")
 	TMap<FString, double> Cooldowns;

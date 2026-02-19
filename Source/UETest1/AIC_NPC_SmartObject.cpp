@@ -5,8 +5,6 @@
 
 AAIC_NPC_SmartObject::AAIC_NPC_SmartObject()
 {
-	StateTreeAI = CreateDefaultSubobject<UStateTreeAIComponent>(TEXT("StateTreeAI"));
-	BrainComponent = StateTreeAI;
 }
 
 void AAIC_NPC_SmartObject::AddCooldown(const FString& Name, double ExpirationTime)
@@ -17,6 +15,10 @@ void AAIC_NPC_SmartObject::AddCooldown(const FString& Name, double ExpirationTim
 void AAIC_NPC_SmartObject::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Find the CachedStateTreeAI component created by the BP SCS
+	CachedStateTreeAI = FindComponentByClass<UStateTreeAIComponent>();
+	BrainComponent = CachedStateTreeAI;
 
 	const bool bDedicatedServer = (GetNetMode() == NM_DedicatedServer);
 	const float Delay = bDedicatedServer ? DedicatedServerStartDelay : ClientStartDelay;
@@ -35,8 +37,8 @@ void AAIC_NPC_SmartObject::BeginPlay()
 
 void AAIC_NPC_SmartObject::StartStateTreeLogic()
 {
-	if (StateTreeAI)
+	if (CachedStateTreeAI)
 	{
-		StateTreeAI->StartLogic();
+		CachedStateTreeAI->StartLogic();
 	}
 }
