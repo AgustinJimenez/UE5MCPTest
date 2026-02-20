@@ -157,13 +157,29 @@ FString FMCPServer::HandleCompileBlueprint(const TSharedPtr<FJsonObject>& Params
 		}
 	}
 
+	// If Blueprint has Error status but CompileLog captured no messages,
+	// add a synthetic error so callers know something is wrong
+	if (!bSuccess && ErrorsArray.Num() == 0)
+	{
+		TSharedPtr<FJsonObject> MsgObj = MakeShared<FJsonObject>();
+		MsgObj->SetStringField(TEXT("message"), TEXT("Blueprint has Error status after compilation (errors may have occurred during asset loading/validation)"));
+		MsgObj->SetStringField(TEXT("severity"), FString::FromInt((int32)EMessageSeverity::Error));
+		ErrorsArray.Add(MakeShared<FJsonValueObject>(MsgObj));
+	}
+
 	Data->SetArrayField(TEXT("errors"), ErrorsArray);
 	Data->SetArrayField(TEXT("warnings"), WarningsArray);
 	Data->SetNumberField(TEXT("error_count"), ErrorsArray.Num());
 	Data->SetNumberField(TEXT("warning_count"), WarningsArray.Num());
 
-	// Always return success=true so error details are visible
-	// The 'compiled' field indicates actual compilation status
+	// Return success=false when compilation actually failed, so callers
+	// who only check 'success' will catch it
+	if (!bSuccess)
+	{
+		FString ErrorMsg = FString::Printf(TEXT("Compilation failed (status: %s, %d errors)"), *StatusString, ErrorsArray.Num());
+		return MakeResponse(false, Data, ErrorMsg);
+	}
+
 	return MakeResponse(true, Data);
 }
 

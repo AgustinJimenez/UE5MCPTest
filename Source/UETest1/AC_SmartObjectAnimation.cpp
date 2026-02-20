@@ -22,7 +22,7 @@ void UAC_SmartObjectAnimation::BeginPlay()
 	CacheNecessaryData();
 }
 
-void UAC_SmartObjectAnimation::PlayMontage_Multi_Implementation(const FSmartObjectAnimationPayload& AnimPayload)
+void UAC_SmartObjectAnimation::PlayMontage_Multi_Implementation(FSmartObjectAnimationPayload AnimPayload)
 {
 	PlaySmartObjectMontage(AnimPayload, false);
 }

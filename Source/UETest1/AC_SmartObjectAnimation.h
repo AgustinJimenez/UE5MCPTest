@@ -30,7 +30,7 @@ public:
 
 	// Replicated multicast: plays montage on all clients
 	UFUNCTION(NetMulticast, Reliable, BlueprintCallable, Category = "SmartObject")
-	void PlayMontage_Multi(const FSmartObjectAnimationPayload& AnimPayload);
+	void PlayMontage_Multi(FSmartObjectAnimationPayload AnimPayload);
 
 	// Internal: sets up and plays the montage
 	UFUNCTION(BlueprintCallable, Category = "SmartObject")

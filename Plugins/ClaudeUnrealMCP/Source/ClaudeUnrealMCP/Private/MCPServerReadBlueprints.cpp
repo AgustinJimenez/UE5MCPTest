@@ -166,6 +166,16 @@ FString FMCPServer::HandleCheckAllBlueprints(const TSharedPtr<FJsonObject>& Para
 			}
 		}
 
+		// If Blueprint has Error status but CompileLog captured no messages,
+		// add a synthetic error so the BP is still reported
+		if (ErrorCount == 0 && Blueprint->Status == BS_Error)
+		{
+			ErrorCount++;
+			TSharedPtr<FJsonObject> MsgObj = MakeShared<FJsonObject>();
+			MsgObj->SetStringField(TEXT("message"), TEXT("Blueprint has Error status after compilation (errors may have occurred during asset loading/validation)"));
+			ErrorsArray.Add(MakeShared<FJsonValueObject>(MsgObj));
+		}
+
 		TotalErrors += ErrorCount;
 		TotalWarnings += WarningCount;
 
