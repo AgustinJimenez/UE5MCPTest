@@ -11,6 +11,7 @@ class UAnimMontage;
 class UAnimInstance;
 class UMotionWarpingComponent;
 class UMoverComponent;
+class UProxyAsset;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnOwnerMontageFinished);
 
@@ -103,6 +104,9 @@ protected:
 
 private:
 	FTimerHandle PlayTimerHandle;
+
+	UPROPERTY()
+	TObjectPtr<UProxyAsset> CachedProxyAsset;
 
 	void OnPlayTimerExpired();
 

@@ -9,6 +9,11 @@
 #include "MoverComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "ProxyAsset.h"
+#include "ProxyTable.h"
+#include "IObjectChooser.h"
+#include "ChooserFunctionLibrary.h"
+#include "ProxyTableFunctionLibrary.h"
 
 UAC_SmartObjectAnimation::UAC_SmartObjectAnimation()
 {
@@ -20,6 +25,11 @@ void UAC_SmartObjectAnimation::BeginPlay()
 {
 	Super::BeginPlay();
 	CacheNecessaryData();
+
+	// Load the SmartObject ProxyAsset (CHPA_SmartObject)
+	CachedProxyAsset = Cast<UProxyAsset>(StaticLoadObject(
+		UProxyAsset::StaticClass(), nullptr,
+		TEXT("/Game/Blueprints/SmartObjects/CHPA_SmartObject.CHPA_SmartObject")));
 }
 
 void UAC_SmartObjectAnimation::PlayMontage_Multi_Implementation(FSmartObjectAnimationPayload AnimPayload)
@@ -213,11 +223,40 @@ UAnimMontage* UAC_SmartObjectAnimation::EvaluateDistanceAndMotionMatch(
 	SmartObjectSelectionInputs.TargetAngle = Angle;
 	SmartObjectSelectionInputs.PoseHistoryNode = PoseHistory;
 
-	// Return outputs from cached selection outputs
+	// Evaluate ProxyTable to select best montage
+	UProxyTable* Table = Cast<UProxyTable>(ProxyTable);
+	if (!Table || !CachedProxyAsset)
+	{
+		OutCost = SmartObjectSelectionOutputs.Cost;
+		OutStartTime = SmartObjectSelectionOutputs.StartTime;
+		return nullptr;
+	}
+
+	// Build chooser evaluation context matching the original BP flow:
+	// 1. AnimInstance as object param (for AnimInstanceSync + PoseSearch)
+	// 2. SmartObjectSelectionInputs as struct param (TargetDistance, TargetAngle, PoseHistory)
+	// 3. SmartObjectSelectionOutputs as struct param (output binding target for Cost/StartTime)
+	FChooserEvaluationContext Context;
+	Context.AddObjectParam(AnimInstance);
+	Context.AddStructParam(SmartObjectSelectionInputs);
+	Context.AddStructParam(SmartObjectSelectionOutputs);
+
+	// Create lookup: ProxyAsset (CHPA_SmartObject) + OverrideTable (passed ProxyTable)
+	FInstancedStruct LookupStruct = UProxyTableFunctionLibrary::MakeLookupProxyWithOverrideTable(
+		CachedProxyAsset, Table);
+
+	// Evaluate the lookup to get the best matching montage
+	// This internally calls Table->FindProxyObject(ProxyAsset->Guid, Context)
+	// which evaluates the chooser and writes OutputStructData into SmartObjectSelectionOutputs
+	UAnimMontage* ResultMontage = Cast<UAnimMontage>(
+		UChooserFunctionLibrary::EvaluateObjectChooserBase(
+			Context, LookupStruct, UAnimMontage::StaticClass()));
+
+	// Read outputs (written by ProxyTable::OutputStructData during evaluation)
 	OutCost = SmartObjectSelectionOutputs.Cost;
 	OutStartTime = SmartObjectSelectionOutputs.StartTime;
 
-	return nullptr;
+	return ResultMontage;
 }
 
 void UAC_SmartObjectAnimation::PlaySmartObjectMontage(
