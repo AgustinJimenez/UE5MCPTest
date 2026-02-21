@@ -114,12 +114,12 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 
 ## CONVERSION SUMMARY
 
-### Successfully Converted (~53 blueprints)
+### Successfully Converted (~55 blueprints)
 - Level actors: LevelBlock, LevelBlock_Traversable, LevelVisuals, LevelButton, SpinningArrow, TargetDummy, StillCam
 - Teleporter system: Teleporter_Level, Teleporter_Sender, Teleporter_Destination
 - Characters: BP_Manny, BP_Quinn, BP_Twinblast, BP_UE4_Mannequin, BP_Echo, BP_Walker
 - Controllers: PC_Sandbox, GM_Sandbox, PC_Locomotor, GM_Locomotor
-- Smart Objects: BP_SmartObject_Base, BP_SmartBench, DistanceToSmartObject
+- Smart Objects: BP_SmartObject_Base, BP_SmartBench, DistanceToSmartObject, STT_FindSmartObject, STT_PlayAnimFromBestCost
 - Movement: BP_MovementMode_Walking, BP_MovementMode_Slide, BP_MovementMode_Falling
 - StateTree: All STT_* (including STT_PlayAnimMontage), STE_*, STC_* classes
 - AnimNotifies: All BP_AnimNotify_FoleyEvent variants, BP_NotifyState_*
@@ -129,16 +129,16 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 - Interfaces: BPI_SandboxCharacter_ABP, BPI_InteractionTransform, I_FoleyAudioBankInterface
 - Data: BFL_HelpfulFunctions, DABP_FoleyAudioBank
 
-### Recently Converted (2026-02-11)
-- **STT_PlayAnimMontage** — StateTree task converted to C++
-  - Uses reflection to call PlayMontage_Multi on AC_SmartObjectAnimation (BP class)
-  - Loads SmartObjectAnimationPayload (BP struct) dynamically via UScriptStruct
+### Recently Converted (2026-02-21)
+- **STT_FindSmartObject** — StateTree task, C++ EnterState override takes precedence. BP event graph (61 nodes) and function graph cleared.
+- **STT_PlayAnimFromBestCost** — StateTree task, already fully C++ (empty event graph). Confirmed working.
+- **STT_PlayAnimMontage** (2026-02-11) — Uses reflection to call PlayMontage_Multi on AC_SmartObjectAnimation (BP class)
 
-### Cannot Convert - Too Complex / Structural Blockers (~4 blueprints)
-- AC_TraversalLogic (125K chars event graph) — **Chooser Table struct blocker RESOLVED**: CHT_TraversalMontages_CMC/Mover successfully migrated to C++ structs (S_TraversalCheckResult, S_TraversalChooserInputs, S_TraversalChooserOutputs) with full nested chooser binding migration. Traversal verified working at runtime. **Remaining blocker**: Large event graph size makes full C++ conversion complex.
-- STT_FindSmartObject (137K chars)
-- AC_SmartObjectAnimation (111K chars)
-- STT_PlayAnimFromBestCost (127K chars)
+### Reparented but C++ Incomplete (~1 blueprint)
+- **AC_SmartObjectAnimation** — Already reparented to C++ parent, event graph empty. C++ ~90% complete. **Gap**: `EvaluateDistanceAndMotionMatch()` returns nullptr (line 220 in AC_SmartObjectAnimation.cpp) — needs Chooser/ProxyTable evaluation logic to select correct montage for NPC approach animations.
+
+### Not Yet Reparented (~1 blueprint)
+- **AC_TraversalLogic** (125K chars event graph, parent: ActorComponent) — No C++ class exists. **Chooser Table struct blocker RESOLVED**: CHT_TraversalMontages_CMC/Mover migrated to C++ structs. Traversal verified working at runtime. **Remaining blocker**: Large event graph (~600-900 LOC equivalent) needs full C++ port.
 
 ### Cannot Convert - Unexported Engine Symbols (~17 blueprints)
 - All AM_* AnimModifiers — parent classes (UMotionExtractorModifier, UCopyBonesModifier,
