@@ -117,6 +117,9 @@ private:
 	FString HandleFixOptionalStructPinDefaults(const TSharedPtr<FJsonObject>& Params);
 	FString HandleSetStructFieldDefault(const TSharedPtr<FJsonObject>& Params);
 
+	// Chooser Table migration (Sprint 9)
+	FString HandleMigrateChooserTable(const TSharedPtr<FJsonObject>& Params);
+
 	// Helpers
 	FString MakeResponse(bool bSuccess, const TSharedPtr<FJsonObject>& Data, const FString& Error = TEXT(""));
 	FString MakeError(const FString& Error);

@@ -67,6 +67,21 @@ FString FMCPServer::HandleMigrateEnumReferences(const TSharedPtr<FJsonObject>& P
 	FString SourceEnumPath = Params->GetStringField(TEXT("source_enum_path"));
 	FString TargetEnumPath = Params->GetStringField(TEXT("target_enum_path"));
 	bool bDryRun = Params->HasField(TEXT("dry_run")) ? Params->GetBoolField(TEXT("dry_run")) : false;
+	bool bSkipStructFields = Params->HasField(TEXT("skip_struct_fields")) ? Params->GetBoolField(TEXT("skip_struct_fields")) : false;
+
+	// Optional: skip specific blueprint paths (e.g. ABPs with PropertyAccess nodes that break on enum type change)
+	TSet<FString> SkipBlueprintPaths;
+	if (Params->HasField(TEXT("skip_blueprint_paths")))
+	{
+		const TArray<TSharedPtr<FJsonValue>>& SkipArray = Params->GetArrayField(TEXT("skip_blueprint_paths"));
+		for (const auto& Val : SkipArray)
+		{
+			SkipBlueprintPaths.Add(Val->AsString());
+		}
+	}
+
+	// Optional: only process a specific blueprint path (whitelist mode)
+	FString OnlyBlueprintPath = Params->HasField(TEXT("blueprint_path")) ? Params->GetStringField(TEXT("blueprint_path")) : TEXT("");
 
 	if (SourceEnumPath.IsEmpty() || TargetEnumPath.IsEmpty())
 	{
@@ -163,12 +178,19 @@ FString FMCPServer::HandleMigrateEnumReferences(const TSharedPtr<FJsonObject>& P
 	// --- Phase 0: Update UserDefinedStruct field definitions ---
 	// BP structs may have fields typed as BP enums. Break/Set/Make nodes derive
 	// sub-pin types from the struct definition, so we must update the source.
+	// SKIP when skip_struct_fields=true: avoids corrupting BP struct assets with C++ enum pointers
+	// (causes CppForm assertion crash on reload when struct SubCategoryObject points to C++ UEnum)
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
 	int32 TotalStructFieldsFixed = 0;
 	TArray<TSharedPtr<FJsonValue>> StructFieldReportsArray;
 	TArray<TSharedPtr<FJsonValue>> StructDiagArray;
+	if (bSkipStructFields)
+	{
+		// Phase 0 skipped — struct field SubCategoryObject left as BP enum to avoid CppForm crash
+	}
+	else
 	{
 		TArray<FAssetData> AllStructAssets;
 		AssetRegistry.GetAssetsByClass(UUserDefinedStruct::StaticClass()->GetClassPathName(), AllStructAssets, true);
@@ -323,6 +345,39 @@ FString FMCPServer::HandleMigrateEnumReferences(const TSharedPtr<FJsonObject>& P
 	{
 		UBlueprint* Blueprint = Cast<UBlueprint>(AssetData.GetAsset());
 		if (!Blueprint) continue;
+
+		// Whitelist: only process a specific blueprint
+		if (!OnlyBlueprintPath.IsEmpty())
+		{
+			FString BPPath = Blueprint->GetPathName();
+			FString PackagePath = Blueprint->GetOutermost()->GetPathName();
+			if (BPPath != OnlyBlueprintPath && !BPPath.StartsWith(OnlyBlueprintPath + TEXT(".")) && PackagePath != OnlyBlueprintPath)
+			{
+				continue;
+			}
+		}
+
+		// Skip blueprints in the skip list
+		if (SkipBlueprintPaths.Num() > 0)
+		{
+			FString BPPath = Blueprint->GetPathName();
+			// Strip _C suffix if present, and also check the package path
+			FString PackagePath = Blueprint->GetOutermost()->GetPathName();
+			bool bShouldSkip = false;
+			for (const FString& SkipPath : SkipBlueprintPaths)
+			{
+				if (BPPath == SkipPath || BPPath.StartsWith(SkipPath + TEXT(".")) || PackagePath == SkipPath)
+				{
+					bShouldSkip = true;
+					break;
+				}
+			}
+			if (bShouldSkip)
+			{
+				continue;
+			}
+		}
+
 		if (DoesBlueprintReferenceEnum(Blueprint, OldEnum))
 		{
 			AffectedBlueprints.Add(Blueprint);

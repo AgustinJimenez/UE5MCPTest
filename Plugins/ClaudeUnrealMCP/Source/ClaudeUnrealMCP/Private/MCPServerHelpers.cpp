@@ -3,6 +3,9 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraphSchema_K2.h"
 #include "Engine/UserDefinedStruct.h"
+#include "K2Node_SetFieldsInStruct.h"
+#include "K2Node_BreakStruct.h"
+#include "K2Node_MakeStruct.h"
 
 UClass* ResolveParentClass(const FString& ParentClassPath)
 {
@@ -102,13 +105,21 @@ void SerializeProperty(const FProperty* Prop, TSharedPtr<FJsonObject>& OutObj)
 	}
 }
 
+static bool IsMatchingStruct(UObject* PinObj, UUserDefinedStruct* OldStruct)
+{
+	if (!PinObj) return false;
+	if (PinObj == OldStruct) return true;
+	// Name-based fallback: UE can have multiple loaded instances of the same struct
+	return PinObj->GetName() == OldStruct->GetName();
+}
+
 bool DoesBlueprintReferenceStruct(UBlueprint* Blueprint, UUserDefinedStruct* OldStruct)
 {
 	// Check variables
 	for (const FBPVariableDescription& Var : Blueprint->NewVariables)
 	{
 		if (Var.VarType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
-			Var.VarType.PinSubCategoryObject.Get() == OldStruct)
+			IsMatchingStruct(Var.VarType.PinSubCategoryObject.Get(), OldStruct))
 		{
 			return true;
 		}
@@ -122,10 +133,25 @@ bool DoesBlueprintReferenceStruct(UBlueprint* Blueprint, UUserDefinedStruct* Old
 		for (UEdGraphNode* Node : Graph->Nodes)
 		{
 			if (!Node) continue;
+
+			// Check struct nodes directly
+			if (UK2Node_BreakStruct* BreakNode = Cast<UK2Node_BreakStruct>(Node))
+			{
+				if (BreakNode->StructType && BreakNode->StructType->GetName() == OldStruct->GetName()) return true;
+			}
+			else if (UK2Node_MakeStruct* MakeNode = Cast<UK2Node_MakeStruct>(Node))
+			{
+				if (MakeNode->StructType && MakeNode->StructType->GetName() == OldStruct->GetName()) return true;
+			}
+			else if (UK2Node_SetFieldsInStruct* SetNode = Cast<UK2Node_SetFieldsInStruct>(Node))
+			{
+				if (SetNode->StructType && SetNode->StructType->GetName() == OldStruct->GetName()) return true;
+			}
+
 			for (UEdGraphPin* Pin : Node->Pins)
 			{
 				if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
-					Pin->PinType.PinSubCategoryObject.Get() == OldStruct)
+					IsMatchingStruct(Pin->PinType.PinSubCategoryObject.Get(), OldStruct))
 				{
 					return true;
 				}

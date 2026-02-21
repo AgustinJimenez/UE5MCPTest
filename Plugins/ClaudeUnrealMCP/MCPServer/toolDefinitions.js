@@ -1334,4 +1334,36 @@ export const MCP_TOOL_DEFINITIONS = [
           required: ["path"],
         },
       },
+      {
+        name: "migrate_chooser_table",
+        description: "Migrate a Chooser Table from BP UserDefinedStruct to C++ USTRUCT. Updates ContextData struct pointers and all column PropertyBindingChain entries from GUID-suffixed BP field names to clean C++ field names. Optionally updates output enum references.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            chooser_path: {
+              type: "string",
+              description: "Full path to the Chooser Table asset (e.g., '/Game/Animations/Traversal/CHT_TraversalMontages_CMC')",
+            },
+            field_name_map: {
+              type: "object",
+              description: "JSON object mapping old GUID-suffixed BP field names to new clean C++ field names. Example: {\"HasFrontLedge_19_52F8C45A46BED06CD777A5A6EFBB34F4\": \"HasFrontLedge\"}",
+              additionalProperties: {
+                type: "string",
+              },
+            },
+            struct_map: {
+              type: "object",
+              description: "Optional. Maps old BP struct names to new C++ struct paths for ContextData replacement. Example: {\"S_TraversalChooserInputs\": \"/Script/UETest1.S_TraversalChooserInputs\", \"S_TraversalChooserOutputs\": \"/Script/UETest1.S_TraversalChooserOutputs\"}",
+              additionalProperties: {
+                type: "string",
+              },
+            },
+            new_struct_path: {
+              type: "string",
+              description: "Optional legacy. Single struct path to replace ALL ContextData entries. Prefer struct_map for tables with multiple struct types.",
+            },
+          },
+          required: ["chooser_path", "field_name_map"],
+        },
+      },
 ];

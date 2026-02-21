@@ -8,6 +8,8 @@ Goal: Convert Blueprints to C++ in order from easiest to hardest.
 
 **Migration pipeline complete: 110 blueprints checked, 0 errors. Walk and sprint animations working.**
 
+**Traversal CHT struct migration complete (2026-02-21)**: S_TraversalCheckResult, S_TraversalChooserInputs, S_TraversalChooserOutputs migrated to C++ USTRUCTs. E_TraversalActionType, E_MovementMode, E_Gait migrated in AC_TraversalLogic. Both CHTs (including 4 nested choosers each) fully migrated with 23 bindings per CHT. Traversal works at runtime. See CHOOSER_TABLE_MIGRATION.md for details.
+
 ### Walk/Sprint Fix (2026-02-13) — COMPLETE
 After Sprint 8 enum migration, walk and sprint animations stopped playing:
 - **Root cause (walk)**: CDO Gait and CameraStyle were `(INVALID)` — old BP enum names couldn't deserialize as C++ enum values. Fixed by setting CDO defaults via MCP (`Gait=Run`, `CameraStyle=Medium`).
@@ -132,8 +134,8 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
   - Uses reflection to call PlayMontage_Multi on AC_SmartObjectAnimation (BP class)
   - Loads SmartObjectAnimationPayload (BP struct) dynamically via UScriptStruct
 
-### Cannot Convert - Too Complex (~4 blueprints)
-- AC_TraversalLogic (125K chars event graph)
+### Cannot Convert - Too Complex / Structural Blockers (~4 blueprints)
+- AC_TraversalLogic (125K chars event graph) — **Chooser Table struct blocker RESOLVED**: CHT_TraversalMontages_CMC/Mover successfully migrated to C++ structs (S_TraversalCheckResult, S_TraversalChooserInputs, S_TraversalChooserOutputs) with full nested chooser binding migration. Traversal verified working at runtime. **Remaining blocker**: Large event graph size makes full C++ conversion complex.
 - STT_FindSmartObject (137K chars)
 - AC_SmartObjectAnimation (111K chars)
 - STT_PlayAnimFromBestCost (127K chars)

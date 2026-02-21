@@ -26,7 +26,9 @@ public class ClaudeUnrealMCP : ModuleRules
 			"JsonUtilities",
 			"EnhancedInput",
 			"InputCore",
-			"UMGEditor"  // For UWidgetBlueprint
+			"UMGEditor",  // For UWidgetBlueprint
+			"Chooser",    // For UChooserTable migration
+			"StructUtils"  // For FInstancedStruct
 		});
 	}
 }

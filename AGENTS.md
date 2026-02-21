@@ -107,6 +107,21 @@ The MCP server:
 - **AI Assistant Note**: The assistant can run the restart command directly using Bash tool: `cd "E:\repo\unreal_engine\UE5MCPTest" && npm run restart:ue:win`
 - Note: `/mcp` command in Claude Code only restarts the Node.js MCP server, not Unreal Engine itself
 
+### TCP Fallback (when MCP connection drops)
+
+When the Claude Code MCP connection is broken (e.g., after editor restart), you can still send commands directly to the TCP server on port 9877 using inline Node.js — **no script files needed**:
+
+```bash
+node -e "
+const net = require('net');
+const c = new net.Socket();
+c.connect(9877, '127.0.0.1', () => c.write(JSON.stringify({command:'compile_blueprint', params:{path:'/Game/Blueprints/MyBP'}}) + '\n'));
+c.on('data', d => { console.log(d.toString()); c.destroy(); });
+"
+```
+
+For multi-step operations, use `node << 'EOF' ... EOF` heredoc instead of creating `.js` files. Always prefer MCP tools directly when the connection is active; use TCP fallback only when `/mcp` reconnect isn't possible or practical.
+
 ### MCP Server Extensibility
 
 **IMPORTANT**: The MCP server is designed to be extended without limitations. If you encounter a limitation while working with the project, you should add new MCP tools to remove that limitation.
@@ -128,6 +143,7 @@ Examples of custom tools added to the MCP server:
 - `clear_animation_blueprint_tags` - Remove AnimBlueprintExtension_Tag objects to fix tag reference errors (2026-01-31)
 - `clear_anim_graph` - Delete all AnimGraph nodes to rebuild from scratch (2026-01-31)
 - **Sprint 1 - Blueprint Function Creation (2026-02-01):** `create_blueprint_function`, `add_function_input`, `add_function_output`, `rename_blueprint_function` - Programmatically build blueprint functions with parameters
+- **Sprint 9 - Chooser Table Migration (2026-02-21):** `migrate_chooser_table` with nested UChooserTable walker — walks ALL property types including TArray<UObject*> to find and fix PropertyBindingChain bindings in nested chooser tables. Supports `field_name_map` (GUID→clean names), `struct_map` (old struct→C++ struct), and recursive nested chooser migration
 
 Do not treat the MCP server as a black box with fixed capabilities - modify it as needed to accomplish your tasks.
 
@@ -632,9 +648,13 @@ if (CachedStaticMesh && !DynamicMaterial)
 
 - [x] ~~Resolve Blueprint vs C++ struct/interface type mismatch~~ — DONE (migrate_struct_references + migrate_enum_references + migrate_interface_references)
 - [x] ~~Convert enums to C++~~ — DONE (7 enums migrated)
-- [x] ~~Reparent SandboxCharacter_CMC to C++~~ — DONE (traversal, animations, camera all working)
+- [x] ~~Reparent ~53 BPs to C++ parents~~ — DONE (Phases 3-10d)
 - [ ] Port remaining ABP functions to C++ (Update_Trajectory, BlendStackInputs, Update_States)
-- [ ] Continue converting other blueprints to C++
+- **BLOCKED — Cannot convert:**
+  - AC_TraversalLogic — Chooser Table deep dependency on BP UserDefinedStructs (GUID-suffixed column bindings, exact struct type match required)
+  - SandboxCharacter_CMC — inherits from ACharacter, not reparented to C++ (PC_Sandbox uses reflection)
+  - 17 AM_* AnimModifiers — AnimationModifierLibrary lacks export macros (LNK2019)
+  - LevelBlock_Traversable — per-instance spline data in levels destroyed by reparenting
 
 ---
 

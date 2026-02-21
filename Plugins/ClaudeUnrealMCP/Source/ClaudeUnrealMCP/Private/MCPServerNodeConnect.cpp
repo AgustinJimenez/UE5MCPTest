@@ -102,6 +102,23 @@ FString FMCPServer::HandleConnectNodes(const TSharedPtr<FJsonObject>& Params)
 		}
 	}
 
+	// Also check interface implementation graphs
+	if (!TargetGraph)
+	{
+		for (const FBPInterfaceDescription& Interface : Blueprint->ImplementedInterfaces)
+		{
+			for (UEdGraph* Graph : Interface.Graphs)
+			{
+				if (Graph && Graph->GetName() == GraphName)
+				{
+					TargetGraph = Graph;
+					break;
+				}
+			}
+			if (TargetGraph) break;
+		}
+	}
+
 	if (!TargetGraph)
 	{
 		return MakeError(FString::Printf(TEXT("Graph not found: %s"), *GraphName));
@@ -286,6 +303,23 @@ FString FMCPServer::HandleDisconnectPin(const TSharedPtr<FJsonObject>& Params)
 				TargetGraph = Graph;
 				break;
 			}
+		}
+	}
+
+	// Also check interface implementation graphs
+	if (!TargetGraph)
+	{
+		for (const FBPInterfaceDescription& Interface : Blueprint->ImplementedInterfaces)
+		{
+			for (UEdGraph* Graph : Interface.Graphs)
+			{
+				if (Graph && Graph->GetName() == GraphName)
+				{
+					TargetGraph = Graph;
+					break;
+				}
+			}
+			if (TargetGraph) break;
 		}
 	}
 

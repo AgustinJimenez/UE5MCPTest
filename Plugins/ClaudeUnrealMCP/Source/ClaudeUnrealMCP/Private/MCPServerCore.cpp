@@ -368,7 +368,8 @@ FString FMCPServer::ProcessCommand(const TSharedPtr<FJsonObject>& JsonCommand)
 		{TEXT("restore_struct_node_pins"), &FMCPServer::HandleRestoreStructNodePins},
 		{TEXT("fix_struct_enum_field_defaults"), &FMCPServer::HandleFixStructEnumFieldDefaults},
 		{TEXT("fix_optional_struct_pin_defaults"), &FMCPServer::HandleFixOptionalStructPinDefaults},
-		{TEXT("set_struct_field_default"), &FMCPServer::HandleSetStructFieldDefault}
+		{TEXT("set_struct_field_default"), &FMCPServer::HandleSetStructFieldDefault},
+		{TEXT("migrate_chooser_table"), &FMCPServer::HandleMigrateChooserTable}
 	};
 
 	if (const FCommandHandler* Handler = CommandHandlers.Find(Command))

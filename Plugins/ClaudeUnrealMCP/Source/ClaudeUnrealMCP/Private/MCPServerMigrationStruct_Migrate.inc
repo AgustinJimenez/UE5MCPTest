@@ -111,11 +111,30 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 	TMap<FName, FName> FieldNameMap;
 	TArray<TSharedPtr<FJsonValue>> MappingsJsonArray;
 
+	// Build display name → C++ property FName map from target struct
+	TMap<FString, FName> DisplayNameToCppPropName;
+	for (TFieldIterator<FProperty> PropIt(NewStruct); PropIt; ++PropIt)
+	{
+		FString DisplayName = PropIt->GetDisplayNameText().ToString();
+		DisplayNameToCppPropName.Add(DisplayName, PropIt->GetFName());
+	}
+
 	const TArray<FStructVariableDescription>& VarDescs = FStructureEditorUtils::GetVarDesc(OldStruct);
 	for (const FStructVariableDescription& Desc : VarDescs)
 	{
 		FName OldName = Desc.VarName;
-		FName CleanName = FName(*Desc.FriendlyName);
+		// Match BP FriendlyName to C++ property via display name
+		FName CleanName;
+		FName* FoundCppName = DisplayNameToCppPropName.Find(Desc.FriendlyName);
+		if (FoundCppName)
+		{
+			CleanName = *FoundCppName;
+		}
+		else
+		{
+			// Fallback: use FriendlyName directly (works if names match exactly)
+			CleanName = FName(*Desc.FriendlyName);
+		}
 		FieldNameMap.Add(OldName, CleanName);
 
 		TSharedPtr<FJsonObject> MapObj = MakeShared<FJsonObject>();
@@ -169,13 +188,16 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 		// --- Update member variables ---
 		for (FBPVariableDescription& Var : Blueprint->NewVariables)
 		{
-			if (Var.VarType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
-				Var.VarType.PinSubCategoryObject.Get() == OldStruct)
+			if (Var.VarType.PinCategory == UEdGraphSchema_K2::PC_Struct)
 			{
-				VarCount++;
-				if (!bDryRun)
+				UObject* VarObj = Var.VarType.PinSubCategoryObject.Get();
+				if (VarObj == OldStruct || (VarObj && VarObj->GetName() == OldStruct->GetName()))
 				{
-					Var.VarType.PinSubCategoryObject = NewStruct;
+					VarCount++;
+					if (!bDryRun)
+					{
+						Var.VarType.PinSubCategoryObject = NewStruct;
+					}
 				}
 			}
 		}
@@ -192,13 +214,16 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 					if (!EntryNode) continue;
 					for (FBPVariableDescription& LocalVar : EntryNode->LocalVariables)
 					{
-						if (LocalVar.VarType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
-							LocalVar.VarType.PinSubCategoryObject.Get() == OldStruct)
+						if (LocalVar.VarType.PinCategory == UEdGraphSchema_K2::PC_Struct)
 						{
-							VarCount++;
-							if (!bDryRun)
+							UObject* VarObj = LocalVar.VarType.PinSubCategoryObject.Get();
+							if (VarObj == OldStruct || (VarObj && VarObj->GetName() == OldStruct->GetName()))
 							{
-								LocalVar.VarType.PinSubCategoryObject = NewStruct;
+								VarCount++;
+								if (!bDryRun)
+								{
+									LocalVar.VarType.PinSubCategoryObject = NewStruct;
+								}
 							}
 						}
 					}
@@ -251,17 +276,27 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 				bool bIsEditablePinNode = false;
 
 				// Check Break/Make/Set struct nodes
-				if (UK2Node_BreakStruct* BreakNode = Cast<UK2Node_BreakStruct>(Node))
+				// IMPORTANT: Check SetFieldsInStruct BEFORE MakeStruct because SetFieldsInStruct inherits from MakeStruct
+				if (UK2Node_SetFieldsInStruct* SetNode = Cast<UK2Node_SetFieldsInStruct>(Node))
 				{
-					if (BreakNode->StructType == OldStruct) { bNodeAffected = true; bIsStructNode = true; }
+					if (SetNode->StructType == OldStruct || (SetNode->StructType && SetNode->StructType->GetName() == OldStruct->GetName()))
+					{
+						bNodeAffected = true; bIsStructNode = true;
+					}
+				}
+				else if (UK2Node_BreakStruct* BreakNode = Cast<UK2Node_BreakStruct>(Node))
+				{
+					if (BreakNode->StructType == OldStruct || (BreakNode->StructType && BreakNode->StructType->GetName() == OldStruct->GetName()))
+					{
+						bNodeAffected = true; bIsStructNode = true;
+					}
 				}
 				else if (UK2Node_MakeStruct* MakeNode = Cast<UK2Node_MakeStruct>(Node))
 				{
-					if (MakeNode->StructType == OldStruct) { bNodeAffected = true; bIsStructNode = true; }
-				}
-				else if (UK2Node_SetFieldsInStruct* SetNode = Cast<UK2Node_SetFieldsInStruct>(Node))
-				{
-					if (SetNode->StructType == OldStruct) { bNodeAffected = true; bIsStructNode = true; }
+					if (MakeNode->StructType == OldStruct || (MakeNode->StructType && MakeNode->StructType->GetName() == OldStruct->GetName()))
+					{
+						bNodeAffected = true; bIsStructNode = true;
+					}
 				}
 				else
 				{
@@ -271,12 +306,15 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 						for (const TSharedPtr<FUserPinInfo>& PinInfo : EditableNode->UserDefinedPins)
 						{
 							if (PinInfo.IsValid() &&
-								PinInfo->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
-								PinInfo->PinType.PinSubCategoryObject.Get() == OldStruct)
+								PinInfo->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
 							{
-								bNodeAffected = true;
-								bIsEditablePinNode = true;
-								break;
+								UObject* PinObj = PinInfo->PinType.PinSubCategoryObject.Get();
+								if (PinObj == OldStruct || (PinObj && PinObj->GetName() == OldStruct->GetName()))
+								{
+									bNodeAffected = true;
+									bIsEditablePinNode = true;
+									break;
+								}
 							}
 						}
 					}
@@ -286,11 +324,14 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 					{
 						for (UEdGraphPin* Pin : Node->Pins)
 						{
-							if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
-								Pin->PinType.PinSubCategoryObject.Get() == OldStruct)
+							if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
 							{
-								bNodeAffected = true;
-								break;
+								UObject* PinObj = Pin->PinType.PinSubCategoryObject.Get();
+								if (PinObj == OldStruct || (PinObj && PinObj->GetName() == OldStruct->GetName()))
+								{
+									bNodeAffected = true;
+									break;
+								}
 							}
 						}
 					}
@@ -327,6 +368,67 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 						if (Pin) Pin->BreakAllPinLinks();
 					}
 
+					// IMPORTANT: Check SetFieldsInStruct BEFORE MakeStruct because SetFieldsInStruct inherits from MakeStruct
+					if (UK2Node_SetFieldsInStruct* SetNode = Cast<UK2Node_SetFieldsInStruct>(Node))
+					{
+						// Save which properties were visible (by remapped C++ name) and their pin default values
+						TSet<FName> VisibleCppProperties;
+						TMap<FName, FString> PinDefaultValues;
+						for (const FOptionalPinFromProperty& PinProp : SetNode->ShowPinForProperties)
+						{
+							if (PinProp.bShowPin)
+							{
+								const FName* NewName = FieldNameMap.Find(PinProp.PropertyName);
+								FName CppName = NewName ? *NewName : PinProp.PropertyName;
+								VisibleCppProperties.Add(CppName);
+								UEdGraphPin* OldPin = SetNode->FindPin(PinProp.PropertyName, EGPD_Input);
+								if (OldPin && !OldPin->DefaultValue.IsEmpty())
+								{
+									PinDefaultValues.Add(CppName, OldPin->DefaultValue);
+								}
+							}
+						}
+
+						SetNode->StructType = NewStruct;
+						// Remap ShowPinForProperties from GUID-suffixed names to C++ property names
+						for (FOptionalPinFromProperty& PinProp : SetNode->ShowPinForProperties)
+						{
+							const FName* NewName = FieldNameMap.Find(PinProp.PropertyName);
+							if (NewName)
+							{
+								PinProp.PropertyName = *NewName;
+							}
+						}
+
+						Node->ReconstructNode();
+
+						// After ReconstructNode, force-enable properties that were visible before migration
+						bool bNeedsSecondReconstruct = false;
+						for (FOptionalPinFromProperty& PinProp : SetNode->ShowPinForProperties)
+						{
+							if (!PinProp.bShowPin && VisibleCppProperties.Contains(PinProp.PropertyName))
+							{
+								PinProp.bShowPin = true;
+								bNeedsSecondReconstruct = true;
+							}
+						}
+						if (bNeedsSecondReconstruct)
+						{
+							Node->ReconstructNode();
+						}
+
+						// Restore pin default values
+						for (const auto& Pair : PinDefaultValues)
+						{
+							UEdGraphPin* NewPin = SetNode->FindPin(Pair.Key, EGPD_Input);
+							if (NewPin)
+							{
+								NewPin->DefaultValue = Pair.Value;
+							}
+						}
+						continue; // Skip the generic ReconstructNode below
+					}
+					// Break/Make struct nodes: just set StructType and let ReconstructNode rebuild
 					if (UK2Node_BreakStruct* BreakNode = Cast<UK2Node_BreakStruct>(Node))
 					{
 						BreakNode->StructType = NewStruct;
@@ -334,10 +436,6 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 					else if (UK2Node_MakeStruct* MakeNode = Cast<UK2Node_MakeStruct>(Node))
 					{
 						MakeNode->StructType = NewStruct;
-					}
-					else if (UK2Node_SetFieldsInStruct* SetNode = Cast<UK2Node_SetFieldsInStruct>(Node))
-					{
-						SetNode->StructType = NewStruct;
 					}
 					Node->ReconstructNode();
 				}
@@ -352,10 +450,13 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 						for (TSharedPtr<FUserPinInfo>& PinInfo : EditableNode->UserDefinedPins)
 						{
 							if (PinInfo.IsValid() &&
-								PinInfo->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
-								PinInfo->PinType.PinSubCategoryObject.Get() == OldStruct)
+								PinInfo->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
 							{
-								PinInfo->PinType.PinSubCategoryObject = NewStruct;
+								UObject* PinObj = PinInfo->PinType.PinSubCategoryObject.Get();
+								if (PinObj == OldStruct || (PinObj && PinObj->GetName() == OldStruct->GetName()))
+								{
+									PinInfo->PinType.PinSubCategoryObject = NewStruct;
+								}
 							}
 						}
 
@@ -373,24 +474,29 @@ FString FMCPServer::HandleMigrateStructReferences(const TSharedPtr<FJsonObject>&
 					// ReconstructNode on generic nodes rebuilds from internal state and reverts our changes
 					for (UEdGraphPin* Pin : Node->Pins)
 					{
-						if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
-							Pin->PinType.PinSubCategoryObject.Get() == OldStruct)
+						if (Pin && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
 						{
-							Pin->PinType.PinSubCategoryObject = NewStruct;
+							UObject* PinObj = Pin->PinType.PinSubCategoryObject.Get();
+							if (PinObj == OldStruct || (PinObj && PinObj->GetName() == OldStruct->GetName()))
+							{
+								Pin->PinType.PinSubCategoryObject = NewStruct;
+							}
 						}
 					}
 
 					// Also update UserDefinedPins on editable pin nodes that weren't caught above
-					// (e.g. CustomEvent nodes where pins reference old struct but UserDefinedPins don't)
 					if (UK2Node_EditablePinBase* EditableNode = Cast<UK2Node_EditablePinBase>(Node))
 					{
 						for (TSharedPtr<FUserPinInfo>& PinInfo : EditableNode->UserDefinedPins)
 						{
 							if (PinInfo.IsValid() &&
-								PinInfo->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct &&
-								PinInfo->PinType.PinSubCategoryObject.Get() == OldStruct)
+								PinInfo->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
 							{
-								PinInfo->PinType.PinSubCategoryObject = NewStruct;
+								UObject* PinObj = PinInfo->PinType.PinSubCategoryObject.Get();
+								if (PinObj == OldStruct || (PinObj && PinObj->GetName() == OldStruct->GetName()))
+								{
+									PinInfo->PinType.PinSubCategoryObject = NewStruct;
+								}
 							}
 						}
 					}
