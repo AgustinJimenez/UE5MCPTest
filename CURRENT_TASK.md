@@ -114,12 +114,12 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 
 ## CONVERSION SUMMARY
 
-### Successfully Converted (~55 blueprints)
+### Successfully Converted (~56 blueprints)
 - Level actors: LevelBlock, LevelBlock_Traversable, LevelVisuals, LevelButton, SpinningArrow, TargetDummy, StillCam
 - Teleporter system: Teleporter_Level, Teleporter_Sender, Teleporter_Destination
 - Characters: BP_Manny, BP_Quinn, BP_Twinblast, BP_UE4_Mannequin, BP_Echo, BP_Walker
 - Controllers: PC_Sandbox, GM_Sandbox, PC_Locomotor, GM_Locomotor
-- Smart Objects: BP_SmartObject_Base, BP_SmartBench, DistanceToSmartObject, STT_FindSmartObject, STT_PlayAnimFromBestCost
+- Smart Objects: BP_SmartObject_Base, BP_SmartBench, DistanceToSmartObject, STT_FindSmartObject, STT_PlayAnimFromBestCost, AC_SmartObjectAnimation
 - Movement: BP_MovementMode_Walking, BP_MovementMode_Slide, BP_MovementMode_Falling
 - StateTree: All STT_* (including STT_PlayAnimMontage), STE_*, STC_* classes
 - AnimNotifies: All BP_AnimNotify_FoleyEvent variants, BP_NotifyState_*
@@ -130,12 +130,10 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 - Data: BFL_HelpfulFunctions, DABP_FoleyAudioBank
 
 ### Recently Converted (2026-02-21)
+- **AC_SmartObjectAnimation** — Implemented `EvaluateDistanceAndMotionMatch()` using ProxyTable/Chooser API. Loads CHPA_SmartObject ProxyAsset, creates FChooserEvaluationContext with PoseHistory/distance/angle inputs, evaluates via MakeLookupProxyWithOverrideTable. Added Chooser+ProxyTable+StructUtils module deps.
 - **STT_FindSmartObject** — StateTree task, C++ EnterState override takes precedence. BP event graph (61 nodes) and function graph cleared.
 - **STT_PlayAnimFromBestCost** — StateTree task, already fully C++ (empty event graph). Confirmed working.
 - **STT_PlayAnimMontage** (2026-02-11) — Uses reflection to call PlayMontage_Multi on AC_SmartObjectAnimation (BP class)
-
-### Reparented but C++ Incomplete (~1 blueprint)
-- **AC_SmartObjectAnimation** — Already reparented to C++ parent, event graph empty. C++ ~90% complete. **Gap**: `EvaluateDistanceAndMotionMatch()` returns nullptr (line 220 in AC_SmartObjectAnimation.cpp) — needs Chooser/ProxyTable evaluation logic to select correct montage for NPC approach animations.
 
 ### Not Yet Reparented (~1 blueprint)
 - **AC_TraversalLogic** (125K chars event graph, parent: ActorComponent) — No C++ class exists. **Chooser Table struct blocker RESOLVED**: CHT_TraversalMontages_CMC/Mover migrated to C++ structs. Traversal verified working at runtime. **Remaining blocker**: Large event graph (~600-900 LOC equivalent) needs full C++ port.
