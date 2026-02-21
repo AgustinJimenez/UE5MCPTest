@@ -10,7 +10,7 @@ public class UETest1 : ModuleRules
 
 		PublicIncludePaths.Add(ModuleDirectory);
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "PoseSearch", "Mover", "MotionWarping", "GameplayTags", "StateTreeModule", "GameplayStateTreeModule", "AIModule", "SmartObjectsModule", "NavigationSystem", "GameplayTasks", "GameplayInteractionsModule", "Landscape", "EnhancedInput", "GameplayCameras", "DrawDebugLibrary", "IKRig", "Chooser", "ProxyTable", "StructUtils" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "PoseSearch", "Mover", "MotionWarping", "GameplayTags", "StateTreeModule", "GameplayStateTreeModule", "AIModule", "SmartObjectsModule", "NavigationSystem", "GameplayTasks", "GameplayInteractionsModule", "Landscape", "EnhancedInput", "GameplayCameras", "DrawDebugLibrary", "IKRig", "Chooser", "ProxyTable", "StructUtils", "AnimationWarpingRuntime" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 	}

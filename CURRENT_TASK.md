@@ -4,9 +4,9 @@ Goal: Convert Blueprints to C++ in order from easiest to hardest.
 
 ---
 
-## CURRENT STATUS (2026-02-13)
+## CURRENT STATUS (2026-02-21)
 
-**Migration pipeline complete: 110 blueprints checked, 0 errors. Walk and sprint animations working.**
+**AC_TraversalLogic fully converted to C++ (2026-02-21)**: Last remaining unconverted blueprint. ~450 LOC C++ implementation covering 5-trace detection pipeline, Chooser Table evaluation, motion warping, montage playback, and CMC/Mover abstraction. BP reparented to C++ class, event graph (51 nodes) cleared, 4 function graphs deleted. Also migrated S_TraversalCheckInputs struct in caller BPs (SandboxCharacter_CMC, SandboxCharacter_Mover). 0 blueprint errors.
 
 **Traversal CHT struct migration complete (2026-02-21)**: S_TraversalCheckResult, S_TraversalChooserInputs, S_TraversalChooserOutputs migrated to C++ USTRUCTs. E_TraversalActionType, E_MovementMode, E_Gait migrated in AC_TraversalLogic. Both CHTs (including 4 nested choosers each) fully migrated with 23 bindings per CHT. Traversal works at runtime. See CHOOSER_TABLE_MIGRATION.md for details.
 
@@ -114,7 +114,7 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 
 ## CONVERSION SUMMARY
 
-### Successfully Converted (~56 blueprints)
+### Successfully Converted (~57 blueprints)
 - Level actors: LevelBlock, LevelBlock_Traversable, LevelVisuals, LevelButton, SpinningArrow, TargetDummy, StillCam
 - Teleporter system: Teleporter_Level, Teleporter_Sender, Teleporter_Destination
 - Characters: BP_Manny, BP_Quinn, BP_Twinblast, BP_UE4_Mannequin, BP_Echo, BP_Walker
@@ -123,20 +123,18 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 - Movement: BP_MovementMode_Walking, BP_MovementMode_Slide, BP_MovementMode_Falling
 - StateTree: All STT_* (including STT_PlayAnimMontage), STE_*, STC_* classes
 - AnimNotifies: All BP_AnimNotify_FoleyEvent variants, BP_NotifyState_*
-- Components: AC_FoleyEvents, AC_PreCMCTick, AC_VisualOverrideManager
+- Components: AC_FoleyEvents, AC_PreCMCTick, AC_VisualOverrideManager, AC_TraversalLogic
 - Cameras: CameraDirector_SandboxCharacter
 - PoseSearch Channels: PSC_Traversal_Head, PSC_Traversal_Pos, PSC_DistanceToTraversalObject
 - Interfaces: BPI_SandboxCharacter_ABP, BPI_InteractionTransform, I_FoleyAudioBankInterface
 - Data: BFL_HelpfulFunctions, DABP_FoleyAudioBank
 
 ### Recently Converted (2026-02-21)
+- **AC_TraversalLogic** — Full C++ port (~450 LOC): 5-trace detection pipeline, Chooser Table evaluation via FChooserEvaluationContext, motion warping with curve sampling, montage playback, CMC/Mover abstraction, RPCs. Also migrated S_TraversalCheckInputs struct in callers. Added AnimationWarpingRuntime module dep.
 - **AC_SmartObjectAnimation** — Implemented `EvaluateDistanceAndMotionMatch()` using ProxyTable/Chooser API. Loads CHPA_SmartObject ProxyAsset, creates FChooserEvaluationContext with PoseHistory/distance/angle inputs, evaluates via MakeLookupProxyWithOverrideTable. Added Chooser+ProxyTable+StructUtils module deps.
 - **STT_FindSmartObject** — StateTree task, C++ EnterState override takes precedence. BP event graph (61 nodes) and function graph cleared.
 - **STT_PlayAnimFromBestCost** — StateTree task, already fully C++ (empty event graph). Confirmed working.
 - **STT_PlayAnimMontage** (2026-02-11) — Uses reflection to call PlayMontage_Multi on AC_SmartObjectAnimation (BP class)
-
-### Not Yet Reparented (~1 blueprint)
-- **AC_TraversalLogic** (125K chars event graph, parent: ActorComponent) — No C++ class exists. **Chooser Table struct blocker RESOLVED**: CHT_TraversalMontages_CMC/Mover migrated to C++ structs. Traversal verified working at runtime. **Remaining blocker**: Large event graph (~600-900 LOC equivalent) needs full C++ port.
 
 ### Cannot Convert - Unexported Engine Symbols (~17 blueprints)
 - All AM_* AnimModifiers — parent classes (UMotionExtractorModifier, UCopyBonesModifier,
