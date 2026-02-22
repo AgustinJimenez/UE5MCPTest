@@ -1244,6 +1244,32 @@ export const MCP_TOOL_DEFINITIONS = [
         },
       },
       {
+        name: "fix_enum_defaults",
+        description: "Fix invalid enum default values in blueprint pins by remapping NewEnumeratorN to actual enum value names. Scans all graphs and updates pins that reference the specified enum.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            enum_path: {
+              type: "string",
+              description: "Full path to the target enum (e.g., /Script/UETest1.E_Gait)",
+            },
+            old_enum_path: {
+              type: "string",
+              description: "Optional: Full path to old BP UserDefinedEnum for legacy name mapping (e.g., /Game/Blueprints/Data/E_Gait)",
+            },
+            dry_run: {
+              type: "boolean",
+              description: "If true, reports what would change without modifying the blueprint. Default: false",
+            },
+          },
+          required: ["blueprint_path", "enum_path"],
+        },
+      },
+      {
         name: "force_fix_enum_pin_defaults",
         description: "Force-fix enum pin defaults that still use NewEnumeratorN by remapping to the enum's value names, even when the enum subcategory object is missing.",
         inputSchema: {
@@ -1364,6 +1390,287 @@ export const MCP_TOOL_DEFINITIONS = [
             },
           },
           required: ["chooser_path", "field_name_map"],
+        },
+      },
+      {
+        name: "fix_struct_sub_pins",
+        description: "Fix GUID-suffixed sub-pin names on Break/Make/SetFieldsInStruct nodes after struct migration. Renames pins in-place, preserving connections.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source_struct_path: {
+              type: "string",
+              description: "Full path to the old BP UserDefinedStruct (e.g., /Game/Blueprints/Data/S_PlayerInputState)",
+            },
+            target_struct_path: {
+              type: "string",
+              description: "Full path to the new C++ USTRUCT (e.g., /Script/UETest1.S_PlayerInputState)",
+            },
+            blueprint_path: {
+              type: "string",
+              description: "Optional: Filter to a specific blueprint path",
+            },
+            dry_run: {
+              type: "boolean",
+              description: "If true, reports what would change without modifying anything. Default: false",
+            },
+            reconstruct_events: {
+              type: "boolean",
+              description: "If true, reconstruct event nodes after fixing sub-pins. Default: false",
+            },
+          },
+          required: ["source_struct_path", "target_struct_path"],
+        },
+      },
+      {
+        name: "migrate_interface_references",
+        description: "Update K2Node_Message nodes to use a different interface class (e.g., from BP interface to C++ UINTERFACE). Changes FunctionReference.MemberParent on all matching message nodes.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            old_interface_path: {
+              type: "string",
+              description: "Full path to the old interface (e.g., /Game/Blueprints/BPI_SandboxCharacter_Pawn)",
+            },
+            new_interface_path: {
+              type: "string",
+              description: "Full path to the new interface (e.g., /Script/UETest1.BPI_SandboxCharacter_Pawn)",
+            },
+            blueprint_paths: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional: Array of blueprint paths to process. If omitted, scans all blueprints.",
+            },
+          },
+          required: ["old_interface_path", "new_interface_path"],
+        },
+      },
+      {
+        name: "reconstruct_node",
+        description: "Reconstruct a blueprint node (rebuilds pins from scratch). Useful after struct/enum type changes. Provide either node_guid or variable_name.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            node_guid: {
+              type: "string",
+              description: "GUID of the specific node to reconstruct",
+            },
+            variable_name: {
+              type: "string",
+              description: "Filter: reconstruct nodes referencing this variable name",
+            },
+            graph_name: {
+              type: "string",
+              description: "Optional: Name of the graph to search in",
+            },
+          },
+          required: ["blueprint_path"],
+        },
+      },
+      {
+        name: "set_pin_default",
+        description: "Set the default value of a specific pin on a blueprint node.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            graph_name: {
+              type: "string",
+              description: "Name of the graph containing the node",
+            },
+            node_guid: {
+              type: "string",
+              description: "GUID of the node",
+            },
+            pin_name: {
+              type: "string",
+              description: "Name of the pin to set",
+            },
+            new_default: {
+              type: "string",
+              description: "New default value string for the pin",
+            },
+          },
+          required: ["blueprint_path", "graph_name", "node_guid", "pin_name", "new_default"],
+        },
+      },
+      {
+        name: "fix_asset_struct_reference",
+        description: "Fix a struct reference in a non-blueprint asset (e.g., Chooser Table ContextData). Replaces old struct pointer with new one.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            asset_path: {
+              type: "string",
+              description: "Full path to the asset (e.g., /Game/Blueprints/Cameras/CHT_CameraRig)",
+            },
+            old_struct_path: {
+              type: "string",
+              description: "Full path to the old struct",
+            },
+            new_struct_path: {
+              type: "string",
+              description: "Full path to the new struct",
+            },
+          },
+          required: ["asset_path", "old_struct_path", "new_struct_path"],
+        },
+      },
+      {
+        name: "delete_node",
+        description: "Delete a specific node from a blueprint graph by its GUID.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            node_id: {
+              type: "string",
+              description: "GUID of the node to delete",
+            },
+            graph_name: {
+              type: "string",
+              description: "Name of the graph containing the node. Default: EventGraph",
+            },
+          },
+          required: ["blueprint_path", "node_id"],
+        },
+      },
+      {
+        name: "add_implemented_interface",
+        description: "Add an interface to a blueprint's implemented interfaces list.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            interface_path: {
+              type: "string",
+              description: "Full path to the interface (e.g., /Script/UETest1.BPI_SandboxCharacter_Pawn)",
+            },
+            skip_graphs: {
+              type: "boolean",
+              description: "If true, prevents creating override graphs for interface functions. Default: false",
+            },
+          },
+          required: ["blueprint_path", "interface_path"],
+        },
+      },
+      {
+        name: "delete_component",
+        description: "Delete a component from a blueprint's Simple Construction Script (SCS).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            component_name: {
+              type: "string",
+              description: "Name of the component to delete",
+            },
+          },
+          required: ["blueprint_path", "component_name"],
+        },
+      },
+      {
+        name: "rename_local_variable",
+        description: "Rename a local variable within a blueprint function graph.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            function_name: {
+              type: "string",
+              description: "Name of the function containing the variable",
+            },
+            old_name: {
+              type: "string",
+              description: "Current name of the local variable",
+            },
+            new_name: {
+              type: "string",
+              description: "New name for the local variable",
+            },
+          },
+          required: ["blueprint_path", "function_name", "old_name", "new_name"],
+        },
+      },
+      {
+        name: "fix_pin_enum_type",
+        description: "Fix a pin's enum type reference (PinSubCategoryObject) from one enum to another.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            wrong_enum_path: {
+              type: "string",
+              description: "Full path to the wrong/old enum to replace",
+            },
+            correct_enum_path: {
+              type: "string",
+              description: "Full path to the correct/new enum",
+            },
+            default_value: {
+              type: "string",
+              description: "Optional: set this default value on fixed pins",
+            },
+            node_guid: {
+              type: "string",
+              description: "Optional: only fix pins on this specific node (by GUID)",
+            },
+          },
+          required: ["blueprint_path", "wrong_enum_path", "correct_enum_path"],
+        },
+      },
+      {
+        name: "restore_struct_node_pins",
+        description: "Restore hidden pins on a K2Node_SetFieldsInStruct node by re-enabling ShowPinForProperties entries.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+            node_guid: {
+              type: "string",
+              description: "GUID of the K2Node_SetFieldsInStruct node",
+            },
+          },
+          required: ["blueprint_path", "node_guid"],
+        },
+      },
+      {
+        name: "fix_struct_enum_field_defaults",
+        description: "Fix enum default values stored in struct field pins across all nodes in a blueprint.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            blueprint_path: {
+              type: "string",
+              description: "Full path to the blueprint asset",
+            },
+          },
+          required: ["blueprint_path"],
         },
       },
 ];

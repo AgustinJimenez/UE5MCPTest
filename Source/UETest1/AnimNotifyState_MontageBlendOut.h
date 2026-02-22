@@ -11,6 +11,8 @@ class UETEST1_API UAnimNotifyState_MontageBlendOut : public UAnimNotifyState
 	GENERATED_BODY()
 
 public:
+	virtual void NotifyTick(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation, float FrameDeltaTime, const FAnimNotifyEventReference& EventReference) override;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "BlendOut")
 	ETraversalBlendOutCondition BlendOutCondition = ETraversalBlendOutCondition::ForceBlendOut;
 

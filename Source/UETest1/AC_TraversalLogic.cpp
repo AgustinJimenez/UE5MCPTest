@@ -466,10 +466,15 @@ void UAC_TraversalLogic::PerformTraversalAction()
 			EMontagePlayReturnType::MontageLength, StartPos, true);
 	}
 
-	// Bind blend-out delegate for cleanup
+	// Bind blend-out delegate (release gate + restore movement mode)
 	FOnMontageBlendingOutStarted BlendOutDelegate;
 	BlendOutDelegate.BindUObject(this, &UAC_TraversalLogic::OnMontageBlendingOut);
 	AnimInstance->Montage_SetBlendingOutDelegate(BlendOutDelegate, TraversalResult.ChosenMontage);
+
+	// Bind end delegate (restore collision after blend-out completes)
+	FOnMontageEnded EndDelegate;
+	EndDelegate.BindUObject(this, &UAC_TraversalLogic::OnMontageEnded);
+	AnimInstance->Montage_SetEndDelegate(EndDelegate, TraversalResult.ChosenMontage);
 
 	// Set state
 	DoingTraversalAction = true;
@@ -477,10 +482,13 @@ void UAC_TraversalLogic::PerformTraversalAction()
 	// Setup warp targets
 	SetWarpTargets();
 
-	// Disable collision with obstacle
+	// Disable collision with entire obstacle actor (covers all components)
 	if (CachedCapsule && TraversalResult.HitComponent)
 	{
-		CachedCapsule->IgnoreComponentWhenMoving(TraversalResult.HitComponent, true);
+		if (AActor* HitActor = TraversalResult.HitComponent->GetOwner())
+		{
+			CachedCapsule->IgnoreActorWhenMoving(HitActor, true);
+		}
 	}
 
 	// Set movement mode to Flying (prevents falling during traversal)
@@ -566,14 +574,8 @@ void UAC_TraversalLogic::SetWarpTargets()
 
 void UAC_TraversalLogic::OnMontageBlendingOut(UAnimMontage* Montage, bool bInterrupted)
 {
-	// Cleanup: restore state after traversal
+	// Release traversal gate so next action can start
 	DoingTraversalAction = false;
-
-	// Restore collision with obstacle
-	if (CachedCapsule && TraversalResult.HitComponent)
-	{
-		CachedCapsule->IgnoreComponentWhenMoving(TraversalResult.HitComponent, false);
-	}
 
 	// Set movement mode based on action type
 	// Vault -> Falling (character is in air on other side)
@@ -581,6 +583,22 @@ void UAC_TraversalLogic::OnMontageBlendingOut(UAnimMontage* Montage, bool bInter
 	EMovementMode NewMode = (TraversalResult.ActionType == E_TraversalActionType::Vault)
 		? MOVE_Falling : MOVE_Walking;
 	SetTraversalMovementMode(NewMode);
+
+	// NOTE: Collision restoration is deferred to OnMontageEnded (after blend-out completes)
+	// to prevent the capsule from colliding with the obstacle while the character is still
+	// blending out of the traversal animation.
+}
+
+void UAC_TraversalLogic::OnMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	// Restore collision with obstacle actor (safe now — blend-out is complete)
+	if (CachedCapsule && TraversalResult.HitComponent)
+	{
+		if (AActor* HitActor = TraversalResult.HitComponent->GetOwner())
+		{
+			CachedCapsule->IgnoreActorWhenMoving(HitActor, false);
+		}
+	}
 
 	// Delayed revert of replication behavior (0.2s)
 	if (UWorld* World = GetWorld())

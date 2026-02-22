@@ -61,8 +61,11 @@ protected:
 		FS_TraversalChooserInputs& Inputs,
 		FS_TraversalChooserOutputs& Outputs);
 
-	// Montage completion callback
+	// Montage blend-out started: release gate + restore movement mode
 	void OnMontageBlendingOut(UAnimMontage* Montage, bool bInterrupted);
+
+	// Montage fully ended (after blend-out completes): restore collision
+	void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
 	// Delayed replication revert
 	void OnReplicationRevertTimer();

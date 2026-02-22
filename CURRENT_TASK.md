@@ -6,9 +6,13 @@ Goal: Convert Blueprints to C++ in order from easiest to hardest.
 
 ## CURRENT STATUS (2026-02-21)
 
-**AC_TraversalLogic fully converted to C++ (2026-02-21)**: Last remaining unconverted blueprint. ~450 LOC C++ implementation covering 5-trace detection pipeline, Chooser Table evaluation, motion warping, montage playback, and CMC/Mover abstraction. BP reparented to C++ class, event graph (51 nodes) cleared, 4 function graphs deleted. Also migrated S_TraversalCheckInputs struct in caller BPs (SandboxCharacter_CMC, SandboxCharacter_Mover). 0 blueprint errors.
+**SandboxCharacter_CMC fully converted to C++ (2026-02-21)**: Main player character blueprint reparented to C++ class `ASandboxCharacter_CMC`. ~1030 LOC C++ implementation covering: input handling (Enhanced Input), physics calculations, gait/speed system, camera setup, rotation, traversal dispatch (direct C++ calls to AC_TraversalLogic), ragdoll, simulated proxy updates, BPI_SandboxCharacter_Pawn interface implementation. 21 BP function graphs deleted, 166 event graph nodes cleared, BP interface removed. K2Node_Message references migrated from BP to C++ interface. All 4 structs re-migrated (S_PlayerInputState, S_CharacterPropertiesForAnimation/Camera/Traversal). Enum defaults fixed across 5 BPs. 0 blueprint errors.
 
-**Traversal CHT struct migration complete (2026-02-21)**: S_TraversalCheckResult, S_TraversalChooserInputs, S_TraversalChooserOutputs migrated to C++ USTRUCTs. E_TraversalActionType, E_MovementMode, E_Gait migrated in AC_TraversalLogic. Both CHTs (including 4 nested choosers each) fully migrated with 23 bindings per CHT. Traversal works at runtime. See CHOOSER_TABLE_MIGRATION.md for details.
+**AC_TraversalLogic fully converted to C++ (2026-02-21)**: ~450 LOC C++ implementation covering 5-trace detection pipeline, Chooser Table evaluation, motion warping, montage playback, and CMC/Mover abstraction. BP reparented to C++ class, event graph (51 nodes) cleared, 4 function graphs deleted. Also migrated S_TraversalCheckInputs struct in caller BPs (SandboxCharacter_CMC, SandboxCharacter_Mover). 0 blueprint errors.
+
+**Traversal CHT struct migration complete (2026-02-21)**: S_TraversalCheckResult, S_TraversalChooserInputs, S_TraversalChooserOutputs migrated to C++ USTRUCTs. E_TraversalActionType, E_MovementMode, E_Gait migrated in AC_TraversalLogic. Both CHTs (including 4 nested choosers each) fully migrated with 23 bindings per CHT. Traversal works at runtime.
+
+**MCP Server toolDefinitions.js updated (2026-02-21)**: Added 13 missing TCP command tools that were only available via raw TCP: fix_enum_defaults, fix_struct_sub_pins, migrate_interface_references, reconstruct_node, set_pin_default, fix_asset_struct_reference, delete_node, add_implemented_interface, delete_component, rename_local_variable, fix_pin_enum_type, restore_struct_node_pins, fix_struct_enum_field_defaults.
 
 ### Walk/Sprint Fix (2026-02-13) — COMPLETE
 After Sprint 8 enum migration, walk and sprint animations stopped playing:
@@ -130,6 +134,7 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 - Data: BFL_HelpfulFunctions, DABP_FoleyAudioBank
 
 ### Recently Converted (2026-02-21)
+- **SandboxCharacter_CMC** — Full C++ port (~1030 LOC): Enhanced Input handling, physics/gait/speed system, camera setup, traversal dispatch (direct calls to AC_TraversalLogic), ragdoll, simulated proxy updates, BPI_SandboxCharacter_Pawn interface. BP reparented to C++. K2Node_Message + all 4 structs + 7 enums migrated in caller BPs. Added AnimGraphRuntime module dep.
 - **AC_TraversalLogic** — Full C++ port (~450 LOC): 5-trace detection pipeline, Chooser Table evaluation via FChooserEvaluationContext, motion warping with curve sampling, montage playback, CMC/Mover abstraction, RPCs. Also migrated S_TraversalCheckInputs struct in callers. Added AnimationWarpingRuntime module dep.
 - **AC_SmartObjectAnimation** — Implemented `EvaluateDistanceAndMotionMatch()` using ProxyTable/Chooser API. Loads CHPA_SmartObject ProxyAsset, creates FChooserEvaluationContext with PoseHistory/distance/angle inputs, evaluates via MakeLookupProxyWithOverrideTable. Added Chooser+ProxyTable+StructUtils module deps.
 - **STT_FindSmartObject** — StateTree task, C++ EnterState override takes precedence. BP event graph (61 nodes) and function graph cleared.
@@ -142,9 +147,8 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 - C++ subclassing causes LNK2019 unresolved externals; Blueprints work via reflection
 - These must remain as Blueprints unless Epic exports the symbols in a future UE version
 
-### High Priority - Blocked by Type Mismatch
-- **SandboxCharacter_CMC** - Main character class
-- **SandboxCharacter_Mover** - Mover-based character
+### High Priority - Remaining
+- **SandboxCharacter_Mover** - Mover-based character (not yet reparented to C++)
 
 ### Low Priority
 - BP_Kellan (MetaHuman character)
