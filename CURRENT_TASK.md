@@ -6,6 +6,10 @@ Goal: Convert Blueprints to C++ in order from easiest to hardest.
 
 ## CURRENT STATUS (2026-02-22)
 
+**All feasible Blueprint conversions complete (2026-02-22)**. Final audit found 14 empty BP wrappers with C++ parents — these cannot be eliminated because their component hierarchies (meshes, triggers, cameras, etc.) and CDO property values live in the BP SCS, not in C++ constructors. Level-placed actors reference BP classes. Remaining non-empty BPs are either hard-blocked or not worth converting.
+
+**MovementMode + STT cleanup (2026-02-22)**: Moved BP_MovementMode_Walking OnActivated (landing detection) and BP_MovementMode_Slide OnActivated (initial boost timer) to C++ `Activate()` overrides. Cleared redundant STT_SetCharacterInputState BP event graph. Fixed tall block traversal bug: added `MaxObstacleHeight` cap (200.0) to AC_TraversalLogic to reject obstacles exceeding max climb animation height.
+
 **SandboxCharacter_Mover fully converted to C++ (2026-02-22)**: Mover-based character reparented to C++ class `ASandboxCharacter_Mover`. ~570 LOC C++ implementation using `UCharacterMoverComponent` API. Implements `IMoverInputProducerInterface::ProduceInput` to feed movement inputs to Mover. Same gait/speed/camera/traversal/ragdoll patterns as CMC variant. 27 BP function graphs deleted, 142 event graph nodes cleared, 2 interfaces removed. 0 errors. Runtime verified.
 
 **SandboxCharacter_CMC fully converted to C++ (2026-02-21)**: Main player character blueprint reparented to C++ class `ASandboxCharacter_CMC`. ~1030 LOC C++ implementation covering: input handling (Enhanced Input), physics calculations, gait/speed system, camera setup, rotation, traversal dispatch (direct C++ calls to AC_TraversalLogic), ragdoll, simulated proxy updates, BPI_SandboxCharacter_Pawn interface implementation. 21 BP function graphs deleted, 166 event graph nodes cleared, BP interface removed. K2Node_Message references migrated from BP to C++ interface. All 4 structs re-migrated (S_PlayerInputState, S_CharacterPropertiesForAnimation/Camera/Traversal). Enum defaults fixed across 5 BPs. 0 blueprint errors.
@@ -137,6 +141,10 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 
 ### Recently Converted (2026-02-22)
 - **SandboxCharacter_Mover** — Full C++ port (~570 LOC): APawn + IBPI_SandboxCharacter_Pawn + IMoverInputProducerInterface. ProduceInput feeds FCharacterDefaultInputs to Mover. Uses CharacterMoverComponent API (IsFalling, IsCrouching, Jump, Crouch, GetVelocity, TryGetFloorCheckHitResult). Same input/gait/speed/camera/traversal/ragdoll patterns as CMC variant. BP reparented: 27 function graphs deleted, 142 event graph nodes cleared, 2 interfaces removed. 0 errors.
+- **BP_MovementMode_Walking** — OnActivated landing detection moved to C++ `Activate()` override (JustLanded timer). BP event graph cleared (8 nodes).
+- **BP_MovementMode_Slide** — OnActivated initial boost timer moved to C++ `Activate()` override. BP event graph cleared (5 nodes).
+- **STT_SetCharacterInputState** — Redundant BP event graph cleared (5 nodes). C++ `EnterState` already implements identical logic.
+- **AC_TraversalLogic** — Added `MaxObstacleHeight` cap (200.0) to reject obstacles too tall for any traversal animation. Fixes floating character on tall blocks.
 
 ### Previously Converted (2026-02-21)
 - **SandboxCharacter_CMC** — Full C++ port (~1030 LOC): Enhanced Input handling, physics/gait/speed system, camera setup, traversal dispatch (direct calls to AC_TraversalLogic), ragdoll, simulated proxy updates, BPI_SandboxCharacter_Pawn interface. BP reparented to C++. K2Node_Message + all 4 structs + 7 enums migrated in caller BPs. Added AnimGraphRuntime module dep.
@@ -152,10 +160,10 @@ Pipeline reduces errors from hundreds to 0. Key insight: struct field enum refer
 - C++ subclassing causes LNK2019 unresolved externals; Blueprints work via reflection
 - These must remain as Blueprints unless Epic exports the symbols in a future UE version
 
-### High Priority - COMPLETE
-- ~~**SandboxCharacter_Mover**~~ — Converted to C++ (2026-02-22)
+### All Conversions Complete
+No remaining feasible conversions. Empty BP wrappers (14 BPs) retain component hierarchies/CDO data needed by levels.
 
-### Low Priority — Not Worth Converting (2026-02-22 Assessment)
+### Not Worth Converting (2026-02-22 Assessment)
 - **BP_Kellan** — MetaHuman character, heavily dependent on MetaHuman plugin BP infrastructure
 - **SandboxCharacter_CMC_ABP** — 68 function graphs, 76 variables. AnimGraph must stay in BP (visual node system: Motion Matching, Blend Stacks, State Machines, IK). Update logic partially in C++ via NativeUpdateAnimation. Converting remaining BP functions would be ~2000+ LOC with high risk of breaking animations, marginal benefit.
 - **SandboxCharacter_Mover_ABP** — Same as CMC_ABP. Already has C++ NativeUpdateAnimation stub. Event graph already cleared.
