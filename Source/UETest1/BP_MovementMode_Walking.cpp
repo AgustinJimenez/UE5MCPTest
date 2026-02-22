@@ -6,6 +6,28 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(BP_MovementMode_Walking)
 
+void UBP_MovementMode_Walking::Activate()
+{
+	// Check if transitioning from Falling (landing)
+	if (UMoverComponent* Mover = GetMoverComponent())
+	{
+		if (Mover->GetMovementModeName() == FName("Falling"))
+		{
+			JustLanded = true;
+
+			if (UWorld* World = Mover->GetWorld())
+			{
+				World->GetTimerManager().SetTimer(JustLandedTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
+				{
+					JustLanded = false;
+				}), 0.2f, false);
+			}
+		}
+	}
+
+	Super::Activate();
+}
+
 void UBP_MovementMode_Walking::SimulationTick_Implementation(const FSimulationTickParams& Params, FMoverTickEndData& OutputState)
 {
 	Super::SimulationTick_Implementation(Params, OutputState);

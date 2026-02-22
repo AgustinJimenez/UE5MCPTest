@@ -110,6 +110,31 @@ struct FCharacterPropertiesForAnimation
 	FVector GroundLocation = FVector::ZeroVector;
 };
 
+// Mover character custom inputs — internal pipeline struct for gait/rotation/direction
+USTRUCT(BlueprintType)
+struct FMoverCustomInputs
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover")
+	E_RotationMode RotationMode = E_RotationMode::OrientToMovement;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover")
+	E_Gait Gait = E_Gait::Run;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover")
+	E_MovementDirection MovementDirection = E_MovementDirection::F;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover")
+	double RotationOffset = 0.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover")
+	double ControlRotationRate = 0.0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover")
+	bool WantsToCrouch = false;
+};
+
 // Blend stack input parameters for animation blending
 USTRUCT(BlueprintType)
 struct FBlendStackInputs

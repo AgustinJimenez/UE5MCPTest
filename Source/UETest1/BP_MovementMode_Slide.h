@@ -21,4 +21,17 @@ public:
 		Deceleration = 300.0f;  // Lower deceleration - slides longer
 		TurningStrength = 3.0f; // Less turning control while sliding
 	}
+
+	virtual void Activate() override;
+
+	// Set true on activation, reset after InitialBoostTime
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover|Slide")
+	bool InitialBoost = false;
+
+	// Duration of the initial boost window (seconds)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover|Slide")
+	float InitialBoostTime = 0.2f;
+
+private:
+	FTimerHandle InitialBoostTimerHandle;
 };

@@ -242,6 +242,12 @@ bool UAC_TraversalLogic::TryTraversalAction(FS_TraversalCheckInputs Inputs)
 	// Step 3.3: Calculate obstacle height
 	CheckResult.ObstacleHeight = FMath::Abs(ActorLocation.Z - CheckResult.FrontLedgeLocation.Z);
 
+	// Step 3.3b: Reject obstacles that exceed the max traversal height
+	if (CheckResult.ObstacleHeight > MaxObstacleHeight)
+	{
+		return true; // Failed: obstacle too tall for any available traversal animation
+	}
+
 	// Step 3.4: Top sweep across obstacle
 	FVector BackRoomPos = FVector::ZeroVector;
 	if (CheckResult.HasBackLedge)

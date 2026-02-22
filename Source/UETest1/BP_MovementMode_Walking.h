@@ -16,6 +16,7 @@ class UETEST1_API UBP_MovementMode_Walking : public UWalkingMode
 	GENERATED_BODY()
 
 public:
+	virtual void Activate() override;
 	virtual void SimulationTick_Implementation(const FSimulationTickParams& Params, FMoverTickEndData& OutputState) override;
 	virtual void GenerateMove_Implementation(const FMoverTickStartData& StartState, const FMoverTimeStep& TimeStep, FProposedMove& OutProposedMove) const override;
 
@@ -99,4 +100,11 @@ public:
 	// Max speed override (-1 = use CommonLegacySettings)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover|Walking Settings", meta = (ForceUnits = "cm/s"))
 	float MaxSpeedOverride = -1.0f;
+
+	// Set true on landing (transition from Falling), reset after 0.2s
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mover|Walking Settings")
+	bool JustLanded = false;
+
+private:
+	FTimerHandle JustLandedTimerHandle;
 };

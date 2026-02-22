@@ -42,6 +42,12 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Traversal")
 	bool IsMoverCharacter = false;
 
+	// Maximum obstacle height (from capsule center to ledge) allowed for traversal.
+	// Obstacles taller than this are rejected before CHT evaluation.
+	// Default 200 = ~290cm actual wall height (capsule center ~90cm above ground).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Traversal")
+	double MaxObstacleHeight = 200.0;
+
 protected:
 	// Perform the traversal action (play montage, set up warping, etc.)
 	UFUNCTION(BlueprintCallable, Category = "Traversal")
