@@ -1,46 +1,54 @@
 """
-Unified TTS script. Default: KittenTTS (fast, CPU). Optional: Qwen3-TTS Homer voice clone.
+Unified TTS dispatcher. Routes to the correct venv's python for each engine.
 
-Usage:
-  python tts.py "message"                  # KittenTTS with Kiki voice
-  python tts.py --homer "mensaje"          # Qwen3-TTS Homer Simpson (Spanish)
-  python tts.py --voice Jasper "message"   # KittenTTS with specific voice
+Engines:
+  (default)    KittenTTS    — fast, CPU, Kiki voice
+  --homer      Qwen3-TTS    — Homer Simpson voice clone (Spanish LATAM, GPU, slow)
+  --f5         F5-TTS       — voice clone (GPU, fast)
+  --chatterbox Chatterbox   — voice clone multilingual (GPU, fast)
+  --cosyvoice  CosyVoice    — voice clone cross-lingual (GPU, fast)
 """
 import os
 import sys
 import argparse
-import winsound
+import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument("text", nargs="*", default=["Hey, I need your attention over here."])
-parser.add_argument("--homer", action="store_true", help="Use Qwen3-TTS Homer voice (Spanish)")
-parser.add_argument("--voice", default="Kiki", help="KittenTTS voice (Bella/Jasper/Luna/Bruno/Rosie/Hugo/Kiki/Leo)")
+parser.add_argument("--homer", action="store_true", help="Qwen3-TTS Homer voice (Spanish)")
+parser.add_argument("--f5", action="store_true", help="F5-TTS voice clone")
+parser.add_argument("--chatterbox", action="store_true", help="Chatterbox multilingual voice clone")
+parser.add_argument("--cosyvoice", action="store_true", help="CosyVoice cross-lingual voice clone")
+parser.add_argument("--voice", default="Kiki", help="KittenTTS voice")
 args = parser.parse_args()
 
 text = " ".join(args.text)
 script_dir = os.path.dirname(os.path.abspath(__file__))
+engine_dir = os.path.join(script_dir, "engines")
 
-if args.homer:
-    sys.path.insert(0, "E:/repo/Qwen3-TTS")
-    import torch
-    import soundfile as sf
-    from qwen_tts import Qwen3TTSModel
+# Each engine has its own script run with its venv's python
+ENGINES = {
+    "homer":      (sys.executable,                                os.path.join(engine_dir, "run_homer.py")),
+    "f5":         ("E:/repo/F5-TTS/.venv/Scripts/python.exe",     os.path.join(engine_dir, "run_f5.py")),
+    "chatterbox": ("E:/repo/Chatterbox/.venv/Scripts/python.exe", os.path.join(engine_dir, "run_chatterbox.py")),
+    "cosyvoice":  ("E:/repo/CosyVoice/.venv/Scripts/python.exe",  os.path.join(engine_dir, "run_cosyvoice.py")),
+}
 
-    model = Qwen3TTSModel.from_pretrained(
-        "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
-        device_map="cuda:0",
-        dtype=torch.bfloat16,
-    )
-    ref_audio = r"C:\Users\agus_\Downloads\homer-simpson-spanish-latam-audio.wav"
-    ref_text = "La rosquilla que guarde en mi escritorio ha desaparecido, seguro fue ese ladron invisible que marge dice que no existe"
+# Determine which engine
+engine = None
+for name in ENGINES:
+    if getattr(args, name, False):
+        engine = name
+        break
 
-    wavs, sr = model.generate_voice_clone(
-        text=text, language="Spanish", ref_audio=ref_audio, ref_text=ref_text,
-    )
+if engine:
+    python_exe, script = ENGINES[engine]
+    ref_audio = os.path.join(script_dir, "homer-simpson-spanish-latam-audio.wav")
     out_path = os.path.join(script_dir, "tts_output.wav")
-    sf.write(out_path, wavs[0], sr)
+    subprocess.run([python_exe, script, text, ref_audio, out_path], check=True)
 else:
-    # Add CUDA DLL directories for onnxruntime
+    # KittenTTS — runs in current python (has deps available)
+    import winsound
     venv_packages = os.path.join("E:/repo/KittenTTS", ".venv", "Lib", "site-packages")
     for pkg in ["nvidia/cudnn/bin", "nvidia/cublas/bin"]:
         dll_dir = os.path.join(venv_packages, pkg)
@@ -55,5 +63,4 @@ else:
     audio = m.generate(text, voice=args.voice)
     out_path = os.path.join(script_dir, "tts_output.wav")
     sf.write(out_path, audio, 24000, subtype="PCM_16")
-
-winsound.PlaySound(out_path, winsound.SND_FILENAME)
+    winsound.PlaySound(out_path, winsound.SND_FILENAME)
